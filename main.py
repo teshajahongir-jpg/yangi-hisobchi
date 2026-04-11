@@ -8,8 +8,11 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 
-# TOKENNI SHU YERGA YOZING
-TOKEN = "8701217643:AAHWBeLZ4T49g37uRAWFvuXJPaVj57joV9M" 
+# Loglarni sozlash
+logging.basicConfig(level=logging.INFO)
+
+# TOKKENNI SHU YERGA ANIQ QILIB YOZDIK
+TOKEN = "8701217643:AAGAWkuIzgenm0bzoucyokC8C7mgqIPa7g8"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -78,7 +81,7 @@ async def process_finish(message: Message, state: FSMContext):
         
         os.remove(output_name)
     except Exception as e:
-        await message.answer(f"Xatolik: {e}\nGitHub-da shablon.docx borligini tekshiring.")
+        await message.answer(f"Xatolik: {e}\nEslatma: GitHub-da 'shablon.docx' borligini tekshiring.")
     
     await state.clear()
 
