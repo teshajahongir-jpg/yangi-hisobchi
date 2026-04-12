@@ -8,7 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-# Sizning oxirgi tokeningiz
+# Yangi tokeningiz
 TOKEN = "8701217643:AAEF3xSLSF10AYYwMH13p8QP612_cbvwoHs"
 
 bot = Bot(token=TOKEN)
@@ -62,79 +62,62 @@ async def p_tovar(m: Message, state: FSMContext):
 
 @dp.message(ContractForm.raqam)
 async def p1(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text)
-    await m.answer("2. Sana:")
-    await state.set_state(ContractForm.sana)
+    await state.update_data(raqam=m.text); await m.answer("2. Sana:"); await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
 async def p2(m: Message, state: FSMContext):
     await state.update_data(sana=m.text)
     data = await state.get_data()
     savol = "3. Firma nomi:" if "Yuridik" in data['shaxs_turi'] else "3. Ism-familiyangiz:"
-    await m.answer(savol)
-    await state.set_state(ContractForm.mijoz)
+    await m.answer(savol); await state.set_state(ContractForm.mijoz)
 
 @dp.message(ContractForm.mijoz)
 async def p3(m: Message, state: FSMContext):
     await state.update_data(mijoz=m.text)
     data = await state.get_data()
     if "Yuridik" in data['shaxs_turi']:
-        await m.answer("4. Direktor ismi:")
-        await state.set_state(ContractForm.direktor)
+        await m.answer("4. Direktor ismi:"); await state.set_state(ContractForm.direktor)
     else:
         await state.update_data(direktor="-")
-        await m.answer("4. Yashash manzili:")
-        await state.set_state(ContractForm.manzil)
+        await m.answer("4. Yashash manzili:"); await state.set_state(ContractForm.manzil)
 
 @dp.message(ContractForm.direktor)
 async def p4(m: Message, state: FSMContext):
     if m.text != "-": await state.update_data(direktor=m.text)
-    await m.answer("5. Manzil:")
-    await state.set_state(ContractForm.manzil)
+    await m.answer("5. Manzil:"); await state.set_state(ContractForm.manzil)
 
 @dp.message(ContractForm.manzil)
 async def p5(m: Message, state: FSMContext):
     await state.update_data(manzil=m.text)
     data = await state.get_data()
     savol = "6. STIR (yoki Pasport):"
-    await m.answer(savol)
-    await state.set_state(ContractForm.stir)
+    await m.answer(savol); await state.set_state(ContractForm.stir)
 
 @dp.message(ContractForm.stir)
 async def p6(m: Message, state: FSMContext):
     await state.update_data(stir=m.text)
     data = await state.get_data()
     if "Yuridik" in data['shaxs_turi']:
-        await m.answer("7. X/R:")
-        await state.set_state(ContractForm.xr)
+        await m.answer("7. X/R:"); await state.set_state(ContractForm.xr)
     else:
         await state.update_data(xr="-", mfo="-")
-        await m.answer("7. Summa (faqat raqamda):")
-        await state.set_state(ContractForm.summa)
+        await m.answer("7. Summa (raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.xr)
 async def p7(m: Message, state: FSMContext):
-    await state.update_data(xr=m.text)
-    await m.answer("8. MFO:")
-    await state.set_state(ContractForm.mfo)
+    await state.update_data(xr=m.text); await m.answer("8. MFO:"); await state.set_state(ContractForm.mfo)
 
 @dp.message(ContractForm.mfo)
 async def p8(m: Message, state: FSMContext):
-    await state.update_data(mfo=m.text)
-    await m.answer("9. Summa (faqat raqamda):")
-    await state.set_state(ContractForm.summa)
+    await state.update_data(mfo=m.text); await m.answer("9. Summa (raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
 async def p9(m: Message, state: FSMContext):
-    await state.update_data(summa=m.text)
-    await m.answer("10. Summa (so'z bilan):")
-    await state.set_state(ContractForm.summa_soz)
+    await state.update_data(summa=m.text); await m.answer("10. Summa (so'z bilan):"); await state.set_state(ContractForm.summa_soz)
 
 @dp.message(ContractForm.summa_soz)
 async def p10(m: Message, state: FSMContext):
-    await state.update_data(summa_soz=m.text)
-    await m.answer("11. Tovar sinfi:")
-    await state.set_state(ContractForm.sinf)
+    await state.update_data(summa_soz=m.text); await m.answer("11. Tovar sinfi:"); await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
 async def p11(m: Message, state: FSMContext):
@@ -160,15 +143,21 @@ async def p11(m: Message, state: FSMContext):
         await m.answer(f"❌ Xato: '{shablon_nomi}' topilmadi.")
     await state.clear()
 
-async def handle(request): return web.Response(text="Bot is Live")
-async def main():
+# Render uchun muhim qism
+async def web_app():
     app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
+    app.router.add_get("/", lambda r: web.Response(text="Bot is running"))
+    return app
+
+async def main():
+    # Web serverni alohida taskda yurgizish
+    runner = web.AppRunner(await web_app())
     await runner.setup()
-    # PORT Render uchun muhim
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    
+    # Bot pollingni boshlash
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
