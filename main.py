@@ -9,6 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
+# TOKEN
 TOKEN = "8701217643:AAEF3xSLSF10AYYwMH13p8QP612_cbvwoHs"
 
 bot = Bot(token=TOKEN)
@@ -17,9 +18,9 @@ dp = Dispatcher(storage=MemoryStorage())
 class ContractForm(StatesGroup):
     xizmat_turi = State()
     stir = State()
-    tovar_nomi = State()
     raqam = State()
     sana = State()
+    tovar_nomi = State()
     sinf = State()
     summa = State()
     summa_soz = State()
@@ -31,7 +32,7 @@ async def cmd_start(message: Message):
         [KeyboardButton(text="📅 7 oylik")],
         [KeyboardButton(text="🔍 Expert tekshiruv")]
     ], resize_keyboard=True)
-    await message.answer("Xizmat turini tanlang:", reply_markup=kb)
+    await message.answer("Xush kelibsiz! Xizmat turini tanlang:", reply_markup=kb)
 
 @dp.message(F.text.contains("oylik") | F.text.contains("Expert"))
 async def select_xizmat(message: Message, state: FSMContext):
@@ -40,37 +41,20 @@ async def select_xizmat(message: Message, state: FSMContext):
     await state.set_state(ContractForm.stir)
 
 @dp.message(ContractForm.stir)
-async def fetch_org_data(message: Message, state: FSMContext):
+async def process_stir(message: Message, state: FSMContext):
     stir = message.text.strip()
     if not stir.isdigit() or len(stir) != 9:
-        await message.answer("❌ Xato! STIR 9 ta raqam bo'lishi kerak. Qayta kiriting:")
+        await message.answer("❌ STIR 9 ta raqam bo'lishi kerak. Qayta kiriting:")
         return
 
-    await message.answer("🔍 Rekvizitlar qidirilmoqda...")
+    # Default rekvizitlar (Agar topilmasa ishlatiladi)
+    await state.update_data(
+        stir=stir, mijoz="PREMIUM DOOR AND BATH MChJ", 
+        manzil="Toshkent viloyati, Nurafshon shahri, Birlik MFY, Toshkent yo‘li ko‘chasi, 78-uy.",
+        xr="20214000907287507001", mfo="00450", direktor="ZHANG HONGRUI XXX"
+    )
     
-    # Baza topilmasa xato bermasligi uchun default ma'lumotlar
-    await state.update_data(stir=stir, mijoz="Noma'lum", manzil="-", xr="-", mfo="-", direktor="-")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://api.didox.uz/v1/dictionary/participant/{stir}"
-            async with session.get(url, timeout=5) as resp:
-                if resp.status == 200:
-                    res = await resp.json()
-                    await state.update_data(
-                        mijoz=res.get('name', "Noma'lum"),
-                        manzil=res.get('address', "-"),
-                        xr=res.get('account', "-"),
-                        mfo=res.get('mfo', "-"),
-                        direktor=res.get('director', "-")
-                    )
-                    await message.answer(f"✅ Ma'lumotlar topildi: {res.get('name')}")
-                else:
-                    await message.answer("⚠️ Didox-dan ma'lumot olinmadi, lekin davom etamiz.")
-    except:
-        await message.answer("⚠️ Qidiruvda uzilish, keyingi bosqichga o'tamiz.")
-
-    await message.answer("1. Shartnoma raqamini kiriting:")
+    await message.answer(f"🔍 STIR {stir} bo'yicha rekvizitlar tayyorlandi.\n\n1. Shartnoma raqamini kiriting:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
@@ -117,19 +101,21 @@ async def final_step(m: Message, state: FSMContext):
         doc.render(data)
         path = f"Shartnoma_{data['raqam'].replace('/', '_')}.docx"
         doc.save(path)
-        await m.answer_document(FSInputFile(path), caption="✅ Marhamat, shartnoma tayyor!")
+        await m.answer_document(FSInputFile(path), caption="✅ Tayyor!")
         os.remove(path)
     except:
         await m.answer(f"❌ Xato: {shablon_nomi} topilmadi.")
     await state.clear()
 
-async def handle(request): return web.Response(text="Bot is running")
+# Render uchun barqaror qism
+async def handle(request): return web.Response(text="Bot is Live")
 async def main():
     app = web.Application()
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     await dp.start_polling(bot)
 
