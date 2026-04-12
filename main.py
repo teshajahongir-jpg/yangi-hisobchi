@@ -8,8 +8,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-# Yangi tokeningiz
-TOKEN = "8701217643:AAEF3xSLSF10AYYwMH13p8QP612_cbvwoHs"
+# Sizning bot tokeningiz
+TOKEN = "8701217643:AAEF3xSLSF1OAYYwMH13p8QP612_cbvwoHs"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -90,8 +90,7 @@ async def p4(m: Message, state: FSMContext):
 async def p5(m: Message, state: FSMContext):
     await state.update_data(manzil=m.text)
     data = await state.get_data()
-    savol = "6. STIR (yoki Pasport):"
-    await m.answer(savol); await state.set_state(ContractForm.stir)
+    await m.answer("6. STIR (yoki Pasport):"); await state.set_state(ContractForm.stir)
 
 @dp.message(ContractForm.stir)
 async def p6(m: Message, state: FSMContext):
@@ -126,9 +125,7 @@ async def p11(m: Message, state: FSMContext):
     await m.answer("⏳ Tayyorlanmoqda...")
 
     pref = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
-    if "1 oylik" in data['xizmat_turi']: suf = "tezkor"
-    elif "7 oylik" in data['xizmat_turi']: suf = "7oy"
-    else: suf = "expert"
+    suf = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     
     shablon_nomi = f"{pref}_{suf}.docx"
 
@@ -143,22 +140,24 @@ async def p11(m: Message, state: FSMContext):
         await m.answer(f"❌ Xato: '{shablon_nomi}' topilmadi.")
     await state.clear()
 
-# Render uchun muhim qism
-async def web_app():
-    app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="Bot is running"))
-    return app
+# Render serveri uchun maxsus funksiya
+async def handle(request):
+    return web.Response(text="Bot is Live")
 
 async def main():
-    # Web serverni alohida taskda yurgizish
-    runner = web.AppRunner(await web_app())
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    # PORT Render muhitidan avtomat olinadi
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
     await site.start()
     
-    # Bot pollingni boshlash
-    await dp.start_polling(bot)
+    # Pollingni boshlash
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
