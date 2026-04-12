@@ -8,21 +8,25 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-TOKEN = "8701217643:AAEl6W1FXo4ySA29BRtnAyczCGr5g3v09Bo"
+TOKEN = "8701217643:AAFrMUwSBEZCV3kybsEWYzHGjFczJ9fBXcs"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 class ContractForm(StatesGroup):
     xizmat_turi = State()
-    stir = State()
     mijoz = State()
-    rekvizitlar = State() # Manzil, XR, MFO, Direktor hammasi birga
+    manzil = State()
+    stir = State()
+    xr = State()
+    mfo = State()
+    direktor = State()
     raqam = State()
     sana = State()
     tovar_nomi = State()
     sinf = State()
     summa = State()
+    summa_soz = State()
 
 @dp.message(F.text == "/start")
 async def cmd_start(message: Message):
@@ -32,71 +36,69 @@ async def cmd_start(message: Message):
     ], resize_keyboard=True)
     await message.answer("Xizmat turini tanlang:", reply_markup=kb)
 
-@dp.message(F.text.contains("oylik") | F.text.contains("Expert"))
+@dp.message(F.text.in_(["⚡️ 1 oylik tezkor", "📅 7 oylik", "🔍 Expert tekshiruv"]))
 async def select_xizmat(message: Message, state: FSMContext):
     await state.update_data(xizmat_turi=message.text)
-    await message.answer("🏢 Korxona STIR (INN) raqamini kiriting:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(ContractForm.stir)
-
-@dp.message(ContractForm.stir)
-async def p_stir(m: Message, state: FSMContext):
-    await state.update_data(stir=m.text)
-    await m.answer("📝 Korxona (Mijoz) nomi:")
+    await message.answer("📝 Korxona (Mijoz) nomi:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ContractForm.mijoz)
 
 @dp.message(ContractForm.mijoz)
 async def p_mijoz(m: Message, state: FSMContext):
-    await state.update_data(mijoz=m.text)
-    await m.answer("📍 Korxona manzili, X/R, MFO va Direktor ismini kiriting (Hammasini bitta xabarda yuboring):")
-    await state.set_state(ContractForm.rekvizitlar)
+    await state.update_data(mijoz=m.text); await m.answer("📍 Manzili:"); await state.set_state(ContractForm.manzil)
 
-@dp.message(ContractForm.rekvizitlar)
-async def p_rekv(m: Message, state: FSMContext):
-    # Bu yerda bir nechta o'zgaruvchini bitta matndan ajratib olish qiyin bo'lgani uchun 
-    # shablonda bitta {{ manzil }} tegidan foydalanishni maslahat beraman
-    await state.update_data(manzil=m.text) 
-    await m.answer("🔢 Shartnoma raqami:")
-    await state.set_state(ContractForm.raqam)
+@dp.message(ContractForm.manzil)
+async def p_manzil(m: Message, state: FSMContext):
+    await state.update_data(manzil=m.text); await m.answer("🔢 STIR (INN):"); await state.set_state(ContractForm.stir)
+
+@dp.message(ContractForm.stir)
+async def p_stir(m: Message, state: FSMContext):
+    await state.update_data(stir=m.text); await m.answer("💳 Hisob raqami (X/R):"); await state.set_state(ContractForm.xr)
+
+@dp.message(ContractForm.xr)
+async def p_xr(m: Message, state: FSMContext):
+    await state.update_data(xr=m.text); await m.answer("🏦 MFO:"); await state.set_state(ContractForm.mfo)
+
+@dp.message(ContractForm.mfo)
+async def p_mfo(m: Message, state: FSMContext):
+    await state.update_data(mfo=m.text); await m.answer("👤 Direktor ismi:"); await state.set_state(ContractForm.direktor)
+
+@dp.message(ContractForm.direktor)
+async def p_direktor(m: Message, state: FSMContext):
+    await state.update_data(direktor=m.text); await m.answer("🔢 Shartnoma raqami:"); await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
 async def p_raqam(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text)
-    await m.answer("📅 Sana:")
-    await state.set_state(ContractForm.sana)
+    await state.update_data(raqam=m.text); await m.answer("📅 Sana:"); await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
 async def p_sana(m: Message, state: FSMContext):
-    await state.update_data(sana=m.text)
-    await m.answer("🏷 Brend nomi:")
-    await state.set_state(ContractForm.tovar_nomi)
+    await state.update_data(sana=m.text); await m.answer("🏷 Brend nomi:"); await state.set_state(ContractForm.tovar_nomi)
 
 @dp.message(ContractForm.tovar_nomi)
 async def p_brend(m: Message, state: FSMContext):
-    await state.update_data(tovar_nomi=m.text)
-    await m.answer("🔢 Tovar sinfi:")
-    await state.set_state(ContractForm.sinf)
+    await state.update_data(tovar_nomi=m.text); await m.answer("🔢 Tovar sinfi:"); await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text)
-    await m.answer("💰 Summa (Raqam va so'zda):")
-    await state.set_state(ContractForm.summa)
+    await state.update_data(sinf=m.text); await m.answer("💰 Summa (raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
-async def final_step(m: Message, state: FSMContext):
-    await state.update_data(summa=m.text)
-    data = await state.get_data()
-    # Direktor ismini manzil ichidan yoki alohida so'rab shablonga qo'shish mumkin
-    data['direktor'] = "Ma'lumotlar ichida" 
+async def p_summa(m: Message, state: FSMContext):
+    await state.update_data(summa=m.text); await m.answer("✍️ Summa (so'z bilan):"); await state.set_state(ContractForm.summa_soz)
 
+@dp.message(ContractForm.summa_soz)
+async def final_step(m: Message, state: FSMContext):
+    await state.update_data(summa_soz=m.text)
+    data = await state.get_data()
     await m.answer("⏳ Shartnoma tayyorlanmoqda...")
+    
     suf = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     shablon_nomi = f"yu_{suf}.docx"
 
     try:
         doc = DocxTemplate(shablon_nomi)
         doc.render(data)
-        path = f"Shartnoma_{data['raqam'].replace('/', '_')}.docx"
+        path = f"S_{data['raqam'].replace('/', '_')}.docx"
         doc.save(path)
         await m.answer_document(FSInputFile(path), caption="✅ Tayyor!")
         os.remove(path)
@@ -104,7 +106,7 @@ async def final_step(m: Message, state: FSMContext):
         await m.answer(f"❌ Xato: {shablon_nomi} topilmadi.")
     await state.clear()
 
-async def handle(request): return web.Response(text="Bot is running")
+async def handle(request): return web.Response(text="Bot Live")
 async def main():
     app = web.Application()
     app.router.add_get("/", handle)
