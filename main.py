@@ -8,16 +8,19 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-TOKEN = "8701217643:AAEF3xSLSF10AYYwMH13p8QP612_cbvwoHs"
+TOKEN = "8701217643:AAEl6W1FXo4ySA29BRtnAyczCGr5g3v09Bo"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 class ContractForm(StatesGroup):
     xizmat_turi = State()
+    stir = State()
+    mijoz = State()
+    rekvizitlar = State() # Manzil, XR, MFO, Direktor hammasi birga
     raqam = State()
     sana = State()
-    brend = State()
+    tovar_nomi = State()
     sinf = State()
     summa = State()
 
@@ -27,41 +30,65 @@ async def cmd_start(message: Message):
         [KeyboardButton(text="⚡️ 1 oylik tezkor"), KeyboardButton(text="📅 7 oylik")],
         [KeyboardButton(text="🔍 Expert tekshiruv")]
     ], resize_keyboard=True)
-    await message.answer("Xush kelibsiz! Xizmat turini tanlang:", reply_markup=kb)
+    await message.answer("Xizmat turini tanlang:", reply_markup=kb)
 
-@dp.message(F.text.in_(["⚡️ 1 oylik tezkor", "📅 7 oylik", "🔍 Expert tekshiruv"]))
+@dp.message(F.text.contains("oylik") | F.text.contains("Expert"))
 async def select_xizmat(message: Message, state: FSMContext):
     await state.update_data(xizmat_turi=message.text)
-    await message.answer("1. Shartnoma raqamini kiriting:", reply_markup=ReplyKeyboardRemove())
+    await message.answer("🏢 Korxona STIR (INN) raqamini kiriting:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(ContractForm.stir)
+
+@dp.message(ContractForm.stir)
+async def p_stir(m: Message, state: FSMContext):
+    await state.update_data(stir=m.text)
+    await m.answer("📝 Korxona (Mijoz) nomi:")
+    await state.set_state(ContractForm.mijoz)
+
+@dp.message(ContractForm.mijoz)
+async def p_mijoz(m: Message, state: FSMContext):
+    await state.update_data(mijoz=m.text)
+    await m.answer("📍 Korxona manzili, X/R, MFO va Direktor ismini kiriting (Hammasini bitta xabarda yuboring):")
+    await state.set_state(ContractForm.rekvizitlar)
+
+@dp.message(ContractForm.rekvizitlar)
+async def p_rekv(m: Message, state: FSMContext):
+    # Bu yerda bir nechta o'zgaruvchini bitta matndan ajratib olish qiyin bo'lgani uchun 
+    # shablonda bitta {{ manzil }} tegidan foydalanishni maslahat beraman
+    await state.update_data(manzil=m.text) 
+    await m.answer("🔢 Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
 async def p_raqam(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text); await m.answer("2. Sana (masalan, 12.04.2026):"); await state.set_state(ContractForm.sana)
+    await state.update_data(raqam=m.text)
+    await m.answer("📅 Sana:")
+    await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
 async def p_sana(m: Message, state: FSMContext):
-    await state.update_data(sana=m.text); await m.answer("3. Tovar belgisi (Brend) nomi:"); await state.set_state(ContractForm.brend)
+    await state.update_data(sana=m.text)
+    await m.answer("🏷 Brend nomi:")
+    await state.set_state(ContractForm.tovar_nomi)
 
-@dp.message(ContractForm.brend)
+@dp.message(ContractForm.tovar_nomi)
 async def p_brend(m: Message, state: FSMContext):
-    await state.update_data(tovar_nomi=m.text); await m.answer("4. Tovar sinfi (masalan, 25):"); await state.set_state(ContractForm.sinf)
+    await state.update_data(tovar_nomi=m.text)
+    await m.answer("🔢 Tovar sinfi:")
+    await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text); await m.answer("5. Shartnoma summasi (raqam va so'zda):"); await state.set_state(ContractForm.summa)
+    await state.update_data(sinf=m.text)
+    await m.answer("💰 Summa (Raqam va so'zda):")
+    await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
 async def final_step(m: Message, state: FSMContext):
-    await state.update_data(summa_soz=m.text)
+    await state.update_data(summa=m.text)
     data = await state.get_data()
-    # Siz aytgan rekvizitlar avtomat qo'shiladi
-    data.update({
-        "mijoz": "PREMIUM DOOR AND BATH MChJ",
-        "manzil": "Toshkent viloyati, Nurafshon shahri, Birlik MFY, Toshkent yo‘li ko‘chasi, 78-uy.",
-        "stir": "312334297", "xr": "20214000907287507001", "mfo": "00450", "direktor": "ZHANG HONGRUI XXX"
-    })
-    
+    # Direktor ismini manzil ichidan yoki alohida so'rab shablonga qo'shish mumkin
+    data['direktor'] = "Ma'lumotlar ichida" 
+
     await m.answer("⏳ Shartnoma tayyorlanmoqda...")
     suf = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     shablon_nomi = f"yu_{suf}.docx"
