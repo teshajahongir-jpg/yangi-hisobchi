@@ -28,7 +28,7 @@ async def cmd_start(m: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🏢 Yuridik shaxs"), KeyboardButton(text="👤 Jismoniy shaxs")]
     ], resize_keyboard=True)
-    await m.answer("Salom! Shartnoma turini tanlang:", reply_markup=kb)
+    await m.answer("Assalomu alaykum! Shartnoma turini tanlang:", reply_markup=kb)
 
 @dp.message(F.text.in_(["🏢 Yuridik shaxs", "👤 Jismoniy shaxs"]))
 async def select_shaxs(m: Message, state: FSMContext):
@@ -54,17 +54,20 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
             match = re.search(fr"{k}[:\s]+([^\n]+)", src, re.I)
             if match: return match.group(1).strip()
         return "-"
+    
+    # Rekvizitlarni tushunish
     lines = t.split('\n')
     mijoz = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
+    
     await state.update_data(
         mijoz=mijoz,
-        stir=get_val(["INN", "STIR", "ИНН", "Pasport"], t),
-        xr=get_val(["H/R", "XR", "X/P", "Hisob"], t).replace(" ", ""),
+        stir=get_val(["INN", "STIR", "ИНН", "Pasport", "ПАСПОРТ"], t),
+        xr=get_val(["H/R", "XR", "X/P", "Hisob", "Ҳ/Р"], t).replace(" ", ""),
         mfo=get_val(["MFO", "МФО"], t).replace(" ", ""),
-        direktor=get_val(["Direktor", "Директор", "F.I.SH"], t),
+        direktor=get_v(["Direktor", "Директор", "F.I.SH", "Ф.И.Ш"], t) if "Yuridik" in (await state.get_data())['shaxs_turi'] else mijoz,
         manzil=get_val(["Manzil", "Манзил"], t)
     )
-    await m.answer("✅ 7. Shartnoma raqamini yuboring:")
+    await m.answer("✅ 7. Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
@@ -81,37 +84,41 @@ async def p_tovar(m: Message, state: FSMContext):
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text); await m.answer("11. Summa (faqat raqamda):"); await state.set_state(ContractForm.summa)
+    await state.update_data(sinf=m.text); await m.answer("11. Summa (raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
 async def p_summa(m: Message, state: FSMContext):
     val = m.text.replace(" ", "")
-    try:
-        formatted = "{:,}".format(int(val)).replace(",", " ")
-        await state.update_data(summa=formatted)
-    except:
-        await state.update_data(summa=m.text)
+    formatted = "{:,}".format(int(val)).replace(",", " ") if val.isdigit() else m.text
+    await state.update_data(summa=formatted)
     await m.answer("12. Summa so'z bilan:"); await state.set_state(ContractForm.summa_soz)
 
 @dp.message(ContractForm.summa_soz)
 async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
+    
+    # Shablonni tanlash
     shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
     xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     shablon_nomi = f"{shaxs}_{xizmat}.docx"
+
     try:
         if os.path.exists(shablon_nomi):
             doc = DocxTemplate(shablon_nomi)
             doc.render(data)
-            file_name = "Amaan mijozlar bilan shartnoma.docx"
-            doc.save(file_name)
-            await m.answer_document(FSInputFile(file_name), caption="✅ Shartnoma tayyor!")
-            os.remove(file_name)
+            
+            # Fayl nomini siz aytgandek qildik
+            output_name = "Amaan mijozlar bilan shartnoma.docx"
+            doc.save(output_name)
+            
+            await m.answer_document(FSInputFile(output_name), caption="✅ Shartnoma tayyor!")
+            os.remove(output_name)
         else:
-            await m.answer(f"❌ Fayl topilmadi: {shablon_nomi}")
+            await m.answer(f"❌ Xato: {shablon_nomi} fayli topilmadi!")
     except Exception as e:
-        await m.answer(f"Xato: {str(e)}")
+        await m.answer(f"⚠️ Shabloningizda xato bor: {str(e)}\nIltimos, Word fayldagi {{ }} belgilarini tekshiring.")
+    
     await state.clear()
 
 async def handle(r): return web.Response(text="Live")
