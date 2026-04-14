@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-TOKEN = "8701217643:AAEF3xSLSF10AYYwMH13p8QP612_cbvwoHs"
+TOKEN = "8701217643:AAG0vyPcyQaCDqw8nhEcM3OrnpLgCHE3YZk"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
