@@ -14,7 +14,7 @@ dp = Dispatcher(storage=MemoryStorage())
 class ContractForm(StatesGroup):
     shaxs_turi = State()
     xizmat_turi = State()
-    rekvizitlar = State() # Jadval ko'rinishida qabul qilish uchun
+    rekvizitlar = State()
     raqam = State()
     sana = State()
     tovar_nomi = State()
@@ -48,27 +48,26 @@ async def ask_rekvizitlar(m: Message, state: FSMContext):
 @dp.message(ContractForm.rekvizitlar)
 async def process_rekvizitlar(m: Message, state: FSMContext):
     text = m.text
+    # Ma'lumotlarni qidirish (Regex kuchaytirildi)
+    inn_m = re.search(r"(?:INN|STIR|ИНН|Pasport|JSHSHIR):\s*([\d\s\w-]+)", text, re.I)
+    xr_m = re.search(r"(?:H/R|XR|Х/Р|X/P|Hisob|X/P):\s*([\d\s]{20,30})", text, re.I)
+    mfo_m = re.search(r"(?:MFO|МФО):\s*([\d\s]{5,7})", text, re.I)
+    dir_m = re.search(r"(?:Direktor|Директор|F\.I\.SH):\s*([^\n]+)", text, re.I)
+    manzil_m = re.search(r"(?:Manzil|Манзил):\s*([^\n]+)", text, re.I)
     
-    # Ma'lumotlarni aqlli qidirish (Regex)
-    inn = re.search(r"(?:INN|STIR|ИНН|Pasport):\s*([\d\s\w-]+)", text, re.I)
-    xr = re.search(r"(?:H/R|XR|Х/Р|X/P|Hisob):\s*([\d\s]{20,30})", text, re.I)
-    mfo = re.search(r"(?:MFO|МФО):\s*([\d\s]{5,7})", text, re.I)
-    dir_name = re.search(r"Direktor|Директор|F.I.SH:\s*([^\n]+)", text, re.I)
-    manzil = re.search(r"Manzil|Манзил:\s*([^\n]+)", text, re.I)
-    
-    # Birinchi qatorni (Korxona nomi) olish
-    mijoz_nomi = text.split('\n')[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
+    # Korxona nomini birinchi qatordan tozalab olish
+    mijoz_nomi = text.split('\n')[0].replace("Korxona:", "").replace("“", "").replace("”", "").replace('"', "").strip()
 
     await state.update_data(
         mijoz=mijoz_nomi,
-        stir=re.sub(r"\s+", "", inn.group(1)) if inn else "-",
-        xr=re.sub(r"\s+", "", xr.group(1))[:20] if xr else "-",
-        mfo=re.sub(r"\s+", "", mfo.group(1)) if mfo else "-",
-        direktor=dir_name.group(1).strip() if dir_name else "-",
-        manzil=manzil.group(1).strip() if manzil else "-"
+        stir=re.sub(r"\s+", "", inn_m.group(1)) if inn_m else "-",
+        xr=re.sub(r"\s+", "", xr_m.group(1))[:20] if xr_m else "-",
+        mfo=re.sub(r"\s+", "", mfo_m.group(1)) if mfo_m else "-",
+        direktor=dir_m.group(1).strip() if dir_m else "-",
+        manzil=manzil_m.group(1).strip() if manzil_m else "-"
     )
     
-    await m.answer("✅ Rekvizitlar qabul qilindi.\n\n7. Shartnoma raqami:")
+    await m.answer("✅ Rekvizitlar olindi.\n\n7. Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
@@ -91,6 +90,7 @@ async def p_sinf(m: Message, state: FSMContext):
 async def p_summa(m: Message, state: FSMContext):
     raw_val = m.text.replace(" ", "")
     try:
+        # Summani orasini ochib yozish (2 000 000)
         formatted = "{:,}".format(int(raw_val)).replace(",", " ")
         await state.update_data(summa=formatted)
     except:
@@ -108,13 +108,19 @@ async def final_render(m: Message, state: FSMContext):
 
     try:
         doc = DocxTemplate(shablon)
+        # Jismoniy shaxsda direktor bo'lmasa, uni bo'sh qoldirish yoki minus qo'yish
+        if "Jismoniy" in data['shaxs_turi'] and data['direktor'] == "-":
+            data['direktor'] = " " # Shartnomada ko'rinmasligi uchun
+            
         doc.render(data)
-        file_name = f"Amaan mijozlar bilan shartnoma №{data['raqam']}.docx"
+        # Fayl nomi: Amaan mijozlar bilan shartnoma №...
+        file_name = f"Amaan mijozlar bilan shartnoma №{data['raqam'].replace('/', '_')}.docx"
         doc.save(file_name)
-        await m.answer_document(FSInputFile(file_name), caption="✅ Shartnoma tayyor!")
+        
+        await m.answer_document(FSInputFile(file_name), caption="✅ Marhamat, shartnoma tayyor!")
         os.remove(file_name)
     except Exception as e:
-        await m.answer(f"❌ Xato: Shablon topilmadi.")
+        await m.answer(f"❌ Xato: Word shablonlari topilmadi. GitHub'ga yuklaganingizni tekshiring.")
     await state.clear()
 
 async def handle(r): return web.Response(text="Bot Live")
