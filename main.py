@@ -43,65 +43,48 @@ async def select_shaxs(m: Message, state: FSMContext):
 @dp.message(ContractForm.xizmat_turi)
 async def ask_rekvizitlar(m: Message, state: FSMContext):
     await state.update_data(xizmat_turi=m.text)
-    await m.answer("📝 Rekvizitlar jadvalini tashlang (MChJ, Manzil, INN, X/P, MFO, Direktor):", reply_markup=ReplyKeyboardRemove())
+    await m.answer("📝 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ContractForm.rekvizitlar)
 
 @dp.message(ContractForm.rekvizitlar)
 async def process_rekvizitlar(m: Message, state: FSMContext):
     text = m.text
-    
-    # Ma'lumotlarni topish uchun kuchaytirilgan qidiruv tizimi
-    def extract(patterns, text):
+    # Rekvizitlarni ajratish
+    def get_val(patterns, src):
         for p in patterns:
-            match = re.search(p, text, re.I | re.M)
-            if match:
-                return match.group(1).strip()
+            res = re.search(p, src, re.I)
+            if res: return res.group(1).strip()
         return "-"
 
-    # INN/STIR uchun qidiruv (oxiridagi X harfini ham hisobga oladi)
-    stir = extract([r"(?:INN|STIR|ИНН|Pasport|JSHSHIR)[:\s]+([\w\d\s]+)"], text)
-    # Hisob raqami (X/P yoki X/R yoki Hisob)
-    xr = extract([r"(?:H/R|XR|Х/Р|X/P|Hisob|X/P)[:\s]+([\d\s]{15,30})"], text)
-    # MFO
-    mfo = extract([r"(?:MFO|МФО)[:\s]+([\d\s]{5,7})"], text)
-    # Direktor
-    direktor = extract([r"(?:Direktor|Директор|F\.I\.SH)[:\s]+([^\n]+)"], text)
-    # Manzil
-    manzil = extract([r"(?:Manzil|Манзил)[:\s]+([^\n]+)"], text)
-    # Korxona nomi (Birinchi qator yoki "Korxona" so'zi bilan)
-    mijoz = text.split('\n')[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
-
     await state.update_data(
-        mijoz=mijoz,
-        stir=re.sub(r"[^\w\d]", "", stir), # Faqat harf va raqamlarni qoldiradi
-        xr=re.sub(r"\s+", "", xr),
-        mfo=re.sub(r"\s+", "", mfo),
-        direktor=direktor,
-        manzil=manzil
+        mijoz=text.split('\n')[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip(),
+        stir=get_val([r"(?:INN|STIR|ИНН|Pasport)[:\s]+([\w\d]+)"], text),
+        xr=get_val([r"(?:H/R|XR|X/P|Hisob)[:\s]+([\d\s]{15,30})"], text).replace(" ", ""),
+        mfo=get_val([r"(?:MFO|МФО)[:\s]+([\d\s]{5,7})"], text).replace(" ", ""),
+        direktor=get_val([r"(?:Direktor|Директор|F\.I\.SH)[:\s]+([^\n]+)"], text),
+        manzil=get_val([r"(?:Manzil|Манзил)[:\s]+([^\n]+)"], text)
     )
-    
-    await m.answer("✅ Rekvizitlar tahlil qilindi.\n\nEndi: **Shartnoma raqamini** yuboring:")
+    await m.answer("✅ 7. Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
 
-# --- QOLGAN BOSQIChLAR ---
 @dp.message(ContractForm.raqam)
-async def p_raqam(m: Message, state: FSMContext):
+async def p_r(m: Message, state: FSMContext):
     await state.update_data(raqam=m.text); await m.answer("8. Sana:"); await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
-async def p_sana(m: Message, state: FSMContext):
+async def p_s(m: Message, state: FSMContext):
     await state.update_data(sana=m.text); await m.answer("9. Brend nomi:"); await state.set_state(ContractForm.tovar_nomi)
 
 @dp.message(ContractForm.tovar_nomi)
-async def p_tovar(m: Message, state: FSMContext):
+async def p_t(m: Message, state: FSMContext):
     await state.update_data(tovar_nomi=m.text); await m.answer("10. Tovar sinfi:"); await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
-async def p_sinf(m: Message, state: FSMContext):
+async def p_si(m: Message, state: FSMContext):
     await state.update_data(sinf=m.text); await m.answer("11. Summa (faqat raqam):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
-async def p_summa(m: Message, state: FSMContext):
+async def p_su(m: Message, state: FSMContext):
     val = m.text.replace(" ", "")
     try:
         formatted = "{:,}".format(int(val)).replace(",", " ")
@@ -114,17 +97,26 @@ async def p_summa(m: Message, state: FSMContext):
 async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
-    pref = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
-    suf = "tezkor" if "tezkor" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
-    shablon = f"{pref}_{suf}.docx"
+    
+    # Fayl nomlarini aniqlash
+    shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
+    xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
+    shablon_nomi = f"{shaxs}_{xizmat}.docx"
+
+    # Shoshilinch tekshirish: Fayl bormi?
+    if not os.path.exists(shablon_nomi):
+        await m.answer(f"❌ Xato: GitHub'da {shablon_nomi} fayli topilmadi! Iltimos, fayl nomini tekshiring.")
+        return
+
     try:
-        doc = DocxTemplate(shablon); doc.render(data)
-        file_name = f"Amaan mijozlar bilan shartnoma №{data['raqam']}.docx"
-        doc.save(file_name)
-        await m.answer_document(FSInputFile(file_name), caption="✅ Shartnoma tayyor!")
-        os.remove(file_name)
+        doc = DocxTemplate(shablon_nomi)
+        doc.render(data)
+        out_name = f"Amaan_shartnoma_{data['raqam'].replace('/', '_')}.docx"
+        doc.save(out_name)
+        await m.answer_document(FSInputFile(out_name), caption="✅ Shartnoma tayyor!")
+        os.remove(out_name)
     except Exception as e:
-        await m.answer("❌ Xato: Shablon fayli topilmadi!")
+        await m.answer(f"⚙️ Tizimda xato: {str(e)}")
     await state.clear()
 
 async def handle(r): return web.Response(text="Bot Live")
