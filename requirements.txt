@@ -1,3 +1,4 @@
-aiogram
-docxtpl
-aiohttp
+aiogram==3.4.1
+docxtpl==0.16.7
+python-docx==1.1.0
+aiohttp==3.9.3
