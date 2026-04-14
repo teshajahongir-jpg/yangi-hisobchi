@@ -7,8 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-# TOKEN
-TOKEN = "8701217643:AAG0vyPcyQaCDqw8nhEcM3OrnpLgCHE3YZk"
+TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -56,7 +55,6 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
             if match: return match.group(1).strip()
         return "-"
 
-    # Rekvizitlarni jadvaldan ajratish (rasmdagi kabi)
     lines = t.split('\n')
     mijoz = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
     
@@ -68,28 +66,62 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
         direktor=get_val(["Direktor", "Директор", "F.I.SH"], t),
         manzil=get_val(["Manzil", "Манзил"], t)
     )
-    await m.answer("✅ Rekvizitlar olindi. \n\n7. Shartnoma raqamini yuboring:")
+    await m.answer("✅ 7. Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
 async def p_raqam(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text)
-    await m.answer("8. Sana (masalan: 14.04.2026):")
-    await state.set_state(ContractForm.sana)
+    await state.update_data(raqam=m.text); await m.answer("8. Sana:"); await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
 async def p_sana(m: Message, state: FSMContext):
-    await state.update_data(sana=m.text)
-    await m.answer("9. Brend nomi:")
-    await state.set_state(ContractForm.tovar_nomi)
+    await state.update_data(sana=m.text); await m.answer("9. Brend nomi:"); await state.set_state(ContractForm.tovar_nomi)
 
 @dp.message(ContractForm.tovar_nomi)
 async def p_tovar(m: Message, state: FSMContext):
-    await state.update_data(tovar_nomi=m.text)
-    await m.answer("10. Tovar sinfi:")
-    await state.set_state(ContractForm.sinf)
+    await state.update_data(tovar_nomi=m.text); await m.answer("10. Tovar sinfi:"); await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text)
-    await m.answer("11. Summa
+    await state.update_data(sinf=m.text); await m.answer("11. Summa (raqamda):"); await state.set_state(ContractForm.summa)
+
+@dp.message(ContractForm.summa)
+async def p_summa(m: Message, state: FSMContext):
+    val = m.text.replace(" ", "")
+    try:
+        formatted = "{:,}".format(int(val)).replace(",", " ")
+        await state.update_data(summa=formatted)
+    except:
+        await state.update_data(summa=m.text)
+    await m.answer("12. Summa so'z bilan:"); await state.set_state(ContractForm.summa_soz)
+
+@dp.message(ContractForm.summa_soz)
+async def final_render(m: Message, state: FSMContext):
+    await state.update_data(summa_soz=m.text)
+    data = await state.get_data()
+    shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
+    xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
+    shablon_nomi = f"{shaxs}_{xizmat}.docx"
+    try:
+        if os.path.exists(shablon_nomi):
+            doc = DocxTemplate(shablon_nomi)
+            doc.render(data)
+            path = f"Doc_{data['raqam'].replace('/', '_')}.docx"
+            doc.save(path)
+            await m.answer_document(FSInputFile(path))
+            os.remove(path)
+        else:
+            await m.answer(f"Fayl yo'q: {shablon_nomi}")
+    except Exception as e:
+        await m.answer(f"Xato: {str(e)}")
+    await state.clear()
+
+async def handle(r): return web.Response(text="Live")
+async def main():
+    app = web.Application(); app.router.add_get("/", handle)
+    runner = web.AppRunner(app); await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
+    await site.start(); await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
