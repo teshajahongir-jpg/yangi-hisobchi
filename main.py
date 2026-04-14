@@ -106,10 +106,10 @@ async def final_render(m: Message, state: FSMContext):
         if os.path.exists(shablon_nomi):
             doc = DocxTemplate(shablon_nomi)
             doc.render(data)
-            path = f"Doc_{data['raqam'].replace('/', '_')}.docx"
-            doc.save(path)
-            await m.answer_document(FSInputFile(path))
-            os.remove(path)
+           file_name = "Amaan mijozlar bilan shartnoma.docx"
+            doc.save(file_name)
+            await m.answer_document(FSInputFile(file_name), caption="✅ Shartnoma tayyor!")
+            os.remove(file_name)
         else:
             await m.answer(f"Fayl yo'q: {shablon_nomi}")
     except Exception as e:
