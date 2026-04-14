@@ -49,8 +49,7 @@ async def ask_rekvizitlar(m: Message, state: FSMContext):
 @dp.message(ContractForm.rekvizitlar)
 async def process_rekvizitlar(m: Message, state: FSMContext):
     text = m.text
-    # Rekvizitlarni ajratish
-    def get_val(patterns, src):
+    def extract(patterns, src):
         for p in patterns:
             res = re.search(p, src, re.I)
             if res: return res.group(1).strip()
@@ -58,11 +57,11 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
 
     await state.update_data(
         mijoz=text.split('\n')[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip(),
-        stir=get_val([r"(?:INN|STIR|ИНН|Pasport)[:\s]+([\w\d]+)"], text),
-        xr=get_val([r"(?:H/R|XR|X/P|Hisob)[:\s]+([\d\s]{15,30})"], text).replace(" ", ""),
-        mfo=get_val([r"(?:MFO|МФО)[:\s]+([\d\s]{5,7})"], text).replace(" ", ""),
-        direktor=get_val([r"(?:Direktor|Директор|F\.I\.SH)[:\s]+([^\n]+)"], text),
-        manzil=get_val([r"(?:Manzil|Манзил)[:\s]+([^\n]+)"], text)
+        stir=extract([r"(?:INN|STIR|ИНН|Pasport)[:\s]+([\w\d]+)"], text),
+        xr=extract([r"(?:H/R|XR|X/P|Hisob)[:\s]+([\d\s]{15,30})"], text).replace(" ", ""),
+        mfo=extract([r"(?:MFO|МФО)[:\s]+([\d\s]{5,7})"], text).replace(" ", ""),
+        direktor=extract([r"(?:Direktor|Директор|F\.I\.SH)[:\s]+([^\n]+)"], text),
+        manzil=extract([r"(?:Manzil|Манзил)[:\s]+([^\n]+)"], text)
     )
     await m.answer("✅ 7. Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
@@ -98,33 +97,16 @@ async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
     
-    # Fayl nomlarini aniqlash
+    # SHABLON NOMINI ANIQLASh (Kichik harflarga o'tkazish orqali xatoni kamaytirish)
     shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
     xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     shablon_nomi = f"{shaxs}_{xizmat}.docx"
 
-    # Shoshilinch tekshirish: Fayl bormi?
     if not os.path.exists(shablon_nomi):
-        await m.answer(f"❌ Xato: GitHub'da {shablon_nomi} fayli topilmadi! Iltimos, fayl nomini tekshiring.")
+        await m.answer(f"⚠️ Xato: '{shablon_nomi}' nomli fayl GitHub'da topilmadi! Iltimos, shablonlaringiz nomini tekshiring.")
         return
 
     try:
         doc = DocxTemplate(shablon_nomi)
         doc.render(data)
-        out_name = f"Amaan_shartnoma_{data['raqam'].replace('/', '_')}.docx"
-        doc.save(out_name)
-        await m.answer_document(FSInputFile(out_name), caption="✅ Shartnoma tayyor!")
-        os.remove(out_name)
-    except Exception as e:
-        await m.answer(f"⚙️ Tizimda xato: {str(e)}")
-    await state.clear()
-
-async def handle(r): return web.Response(text="Bot Live")
-async def main():
-    app = web.Application(); app.router.add_get("/", handle)
-    runner = web.AppRunner(app); await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
-    await site.start(); await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        out_path = f"Amaan_shartnoma_{data['raqam'].replace('/', '_')}.docx"
