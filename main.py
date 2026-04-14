@@ -54,10 +54,8 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
             match = re.search(fr"{k}[:\s]+([^\n]+)", src, re.I)
             if match: return match.group(1).strip()
         return "-"
-
     lines = t.split('\n')
     mijoz = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
-    
     await state.update_data(
         mijoz=mijoz,
         stir=get_val(["INN", "STIR", "ИНН", "Pasport"], t),
@@ -66,7 +64,7 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
         direktor=get_val(["Direktor", "Директор", "F.I.SH"], t),
         manzil=get_val(["Manzil", "Манзил"], t)
     )
-    await m.answer("✅ 7. Shartnoma raqami:")
+    await m.answer("✅ 7. Shartnoma raqamini yuboring:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
@@ -83,7 +81,7 @@ async def p_tovar(m: Message, state: FSMContext):
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text); await m.answer("11. Summa (raqamda):"); await state.set_state(ContractForm.summa)
+    await state.update_data(sinf=m.text); await m.answer("11. Summa (faqat raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
 async def p_summa(m: Message, state: FSMContext):
@@ -106,12 +104,12 @@ async def final_render(m: Message, state: FSMContext):
         if os.path.exists(shablon_nomi):
             doc = DocxTemplate(shablon_nomi)
             doc.render(data)
-           file_name = "Amaan mijozlar bilan shartnoma.docx"
+            file_name = "Amaan mijozlar bilan shartnoma.docx"
             doc.save(file_name)
             await m.answer_document(FSInputFile(file_name), caption="✅ Shartnoma tayyor!")
             os.remove(file_name)
         else:
-            await m.answer(f"Fayl yo'q: {shablon_nomi}")
+            await m.answer(f"❌ Fayl topilmadi: {shablon_nomi}")
     except Exception as e:
         await m.answer(f"Xato: {str(e)}")
     await state.clear()
