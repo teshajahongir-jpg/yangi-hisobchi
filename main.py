@@ -7,8 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
-# TOKENNI O'ZGARTIRMANG
-TOKEN = "8701217643:AAG0vyPcyQaCDqw8nhEcM3OrnpLgCHE3YZk"
+TOKEN = "8701217643:AAEF3xSLSF10AYYwMH13p8QP612_cbvwoHs"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -44,86 +43,57 @@ async def select_shaxs(m: Message, state: FSMContext):
 @dp.message(ContractForm.xizmat_turi)
 async def ask_rekvizitlar(m: Message, state: FSMContext):
     await state.update_data(xizmat_turi=m.text)
-    await m.answer("📝 Rekvizitlar jadvalini tashlang (Korxona, Manzil, INN, X/P, MFO, Direktor):", reply_markup=ReplyKeyboardRemove())
+    await m.answer("📝 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ContractForm.rekvizitlar)
 
 @dp.message(ContractForm.rekvizitlar)
 async def process_rekvizitlar(m: Message, state: FSMContext):
-    text = m.text
-    
-    def find_val(keys, src):
-        for k in keys:
-            match = re.search(fr"{k}[:\s]+([^\n]+)", src, re.I)
-            if match: return match.group(1).strip()
-        return "-"
-
-    # Ma'lumotlarni jadvaldan sug'urib olish
-    mijoz = text.split('\n')[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
-    stir = find_val(["INN", "STIR", "ИНН", "Pasport", "JSHSHIR"], text)
-    xr = find_val(["H/R", "XR", "Х/Р", "X/P", "Hisob"], text).replace(" ", "")
-    mfo = find_val(["MFO", "МФО"], text).replace(" ", "")
-    direktor = find_val(["Direktor", "Диrektor", "F.I.SH"], text)
-    manzil = find_val(["Manzil", "Манзил"], text)
+    t = m.text
+    # Oddiy va aniq qidiruv
+    def get_info(pat, src):
+        res = re.search(pat, src, re.I)
+        return res.group(1).strip() if res else "-"
 
     await state.update_data(
-        mijoz=mijoz,
-        stir=re.sub(r"[^\w\d]", "", stir),
-        xr=xr[:20] if len(xr) >= 20 else "-",
-        mfo=mfo[:5] if len(mfo) >= 5 else "-",
-        direktor=direktor,
-        manzil=manzil
+        mijoz=t.split('\n')[0].strip(),
+        stir=get_info(r"(?:INN|STIR|ИНН|Pasport)[:\s]+([\w\d]+)", t),
+        xr=get_info(r"(?:H/R|XR|X/P|Hisob)[:\s]+([\d\s]{15,30})", t).replace(" ", ""),
+        mfo=get_info(r"(?:MFO|МФО)[:\s]+([\d\s]{5,7})", t).replace(" ", ""),
+        direktor=get_info(r"(?:Direktor|Директор|F\.I\.SH)[:\s]+([^\n]+)", t),
+        manzil=get_info(r"(?:Manzil|Манзил)[:\s]+([^\n]+)", t)
     )
-    
-    await m.answer("✅ Rekvizitlar olindi. \n\n7. Shartnoma raqamini yuboring:")
+    await m.answer("✅ 7. Shartnoma raqami:")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
-async def p_raqam(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text)
-    await m.answer("8. Sana (masalan: 14.04.2026):")
-    await state.set_state(ContractForm.sana)
+async def p1(m: Message, state: FSMContext):
+    await state.update_data(raqam=m.text); await m.answer("8. Sana:"); await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
-async def p_sana(m: Message, state: FSMContext):
-    await state.update_data(sana=m.text)
-    await m.answer("9. Brend nomi:")
-    await state.set_state(ContractForm.tovar_nomi)
+async def p2(m: Message, state: FSMContext):
+    await state.update_data(sana=m.text); await m.answer("9. Brend nomi:"); await state.set_state(ContractForm.tovar_nomi)
 
 @dp.message(ContractForm.tovar_nomi)
-async def p_tovar(m: Message, state: FSMContext):
-    await state.update_data(tovar_nomi=m.text)
-    await m.answer("10. Tovar sinfi:")
-    await state.set_state(ContractForm.sinf)
+async def p3(m: Message, state: FSMContext):
+    await state.update_data(tovar_nomi=m.text); await m.answer("10. Tovar sinfi:"); await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
-async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text)
-    await m.answer("11. Summa (faqat raqamda):")
-    await state.set_state(ContractForm.summa)
+async def p4(m: Message, state: FSMContext):
+    await state.update_data(sinf=m.text); await m.answer("11. Summa (raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
-async def p_summa(m: Message, state: FSMContext):
+async def p5(m: Message, state: FSMContext):
     val = m.text.replace(" ", "")
     try:
         formatted = "{:,}".format(int(val)).replace(",", " ")
         await state.update_data(summa=formatted)
     except:
         await state.update_data(summa=m.text)
-    await m.answer("12. Summa so'z bilan (o'zingiz kiriting):")
-    await state.set_state(ContractForm.summa_soz)
+    await m.answer("12. Summa so'z bilan:"); await state.set_state(ContractForm.summa_soz)
 
 @dp.message(ContractForm.summa_soz)
 async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
     
-    # Jismoniy shaxsda direktorni olib tashlash
-    if "Jismoniy" in data['shaxs_turi']:
-        data['direktor'] = "-"
-
-    # Shablonni tanlash
-    shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
-    xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
-    shablon_nomi = f"{shaxs}_{xizmat}.docx"
-
-    if not os.path.exists(shablon_nom
+    shaxs = "yu" if "Yurid
