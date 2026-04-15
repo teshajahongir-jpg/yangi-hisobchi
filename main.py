@@ -12,6 +12,7 @@ TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+# HAR BIR QADAMNI ANIQ BELGILAYMIZ
 class ContractForm(StatesGroup):
     shaxs_turi = State()
     xizmat_turi = State()
@@ -44,7 +45,7 @@ async def select_shaxs(m: Message, state: FSMContext):
 @dp.message(ContractForm.xizmat_turi)
 async def ask_rekvizitlar(m: Message, state: FSMContext):
     await state.update_data(xizmat_turi=m.text)
-    await m.answer("📝 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
+    await m.answer("📝 Rekvizitlar jadvalini tashlang (Nusxa olib):", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ContractForm.rekvizitlar)
 
 @dp.message(ContractForm.rekvizitlar)
@@ -67,31 +68,31 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
         direktor=get_val(["Direktor", "Директор", "F.I.SH", "Ф.И.Ш"], t),
         manzil=get_val(["Manzil", "Манзил"], t)
     )
-    await m.answer("✅ 7. Shartnoma raqami:")
+    await m.answer("✅ 7. Shartnoma raqami (masalan: 52/26):")
     await state.set_state(ContractForm.raqam)
 
 @dp.message(ContractForm.raqam)
 async def p_raqam(m: Message, state: FSMContext):
     await state.update_data(raqam=m.text)
-    await m.answer("8. Sana:")
+    await m.answer("📅 8. Sana (masalan: 20-aprel):")
     await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
 async def p_sana(m: Message, state: FSMContext):
     await state.update_data(sana=m.text)
-    await m.answer("9. Brend nomi:")
+    await m.answer("🏷 9. Brend nomi (masalan: Huggo):")
     await state.set_state(ContractForm.tovar_nomi)
 
 @dp.message(ContractForm.tovar_nomi)
 async def p_tovar(m: Message, state: FSMContext):
     await state.update_data(tovar_nomi=m.text)
-    await m.answer("10. Tovar sinfi:")
+    await m.answer("🔢 10. Tovar sinfi (masalan: 12):")
     await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
     await state.update_data(sinf=m.text)
-    await m.answer("11. Summa (faqat raqamda):")
+    await m.answer("💰 11. Summa (faqat raqamda, masalan: 2000000):")
     await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
@@ -99,7 +100,7 @@ async def p_summa(m: Message, state: FSMContext):
     val = m.text.replace(" ", "")
     formatted = "{:,}".format(int(val)).replace(",", " ") if val.isdigit() else m.text
     await state.update_data(summa=formatted)
-    await m.answer("12. Summa so'z bilan:")
+    await m.answer("🔡 12. Summa so'z bilan (masalan: ikki million):")
     await state.set_state(ContractForm.summa_soz)
 
 @dp.message(ContractForm.summa_soz)
@@ -115,32 +116,23 @@ async def final_render(m: Message, state: FSMContext):
         if os.path.exists(shablon_nomi):
             doc = DocxTemplate(shablon_nomi)
             doc.render(data)
-            output_name = "Amaan mijozlar bilan shartnoma.docx"
-            doc.save(output_name)
-            await m.answer_document(FSInputFile(output_name), caption="✅ Shartnoma tayyor!")
-            os.remove(output_name)
+            file_name = "Amaan mijozlar bilan shartnoma.docx"
+            doc.save(file_name)
+            await m.answer_document(FSInputFile(file_name), caption="✅ Shartnoma tayyor!")
+            os.remove(file_name)
         else:
             await m.answer(f"❌ Fayl topilmadi: {shablon_nomi}")
     except Exception as e:
-        await m.answer(f"⚠️ Shabloningizda xato bor: {str(e)}\nIltimos, Word fayldagi {{ }} belgilarini tekshiring.")
+        await m.answer(f"⚠️ Word shablonda xato: {str(e)}\n\nIltimos, Word fayldagi {{ }} belgilarini tekshiring!")
     
     await state.clear()
 
-# Render uyquga ketmasligi uchun va xatolarni oldini olish uchun web-server
-async def handle(r): return web.Response(text="Bot is running")
+async def handle(r): return web.Response(text="Bot Live")
 async def main():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
+    app = web.Application(); app.router.add_get("/", handle)
+    runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
-    await site.start()
-    
-    # Botni ishga tushirish
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
+    await site.start(); await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
