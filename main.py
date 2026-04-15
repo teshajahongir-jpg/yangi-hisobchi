@@ -44,7 +44,7 @@ async def select_shaxs(m: Message, state: FSMContext):
 @dp.message(ContractForm.xizmat_turi)
 async def ask_rekvizitlar(m: Message, state: FSMContext):
     await state.update_data(xizmat_turi=m.text)
-    await m.answer("📝 Rekvizitlar jadvalini tashlang (Nusxa olib):", reply_markup=ReplyKeyboardRemove())
+    await m.answer("📝 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ContractForm.rekvizitlar)
 
 @dp.message(ContractForm.rekvizitlar)
@@ -72,33 +72,41 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
 
 @dp.message(ContractForm.raqam)
 async def p_raqam(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text); await m.answer("8. Sana:"); await state.set_state(ContractForm.sana)
+    await state.update_data(raqam=m.text)
+    await m.answer("8. Sana:")
+    await state.set_state(ContractForm.sana)
 
 @dp.message(ContractForm.sana)
 async def p_sana(m: Message, state: FSMContext):
-    await state.update_data(sana=m.text); await m.answer("9. Brend nomi:"); await state.set_state(ContractForm.tovar_nomi)
+    await state.update_data(sana=m.text)
+    await m.answer("9. Brend nomi:")
+    await state.set_state(ContractForm.tovar_nomi)
 
 @dp.message(ContractForm.tovar_nomi)
 async def p_tovar(m: Message, state: FSMContext):
-    await state.update_data(tovar_nomi=m.text); await m.answer("10. Tovar sinfi:"); await state.set_state(ContractForm.sinf)
+    await state.update_data(tovar_nomi=m.text)
+    await m.answer("10. Tovar sinfi:")
+    await state.set_state(ContractForm.sinf)
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text); await m.answer("11. Summa (faqat raqamda):"); await state.set_state(ContractForm.summa)
+    await state.update_data(sinf=m.text)
+    await m.answer("11. Summa (faqat raqamda):")
+    await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
 async def p_summa(m: Message, state: FSMContext):
     val = m.text.replace(" ", "")
     formatted = "{:,}".format(int(val)).replace(",", " ") if val.isdigit() else m.text
     await state.update_data(summa=formatted)
-    await m.answer("12. Summa so'z bilan:"); await state.set_state(ContractForm.summa_soz)
+    await m.answer("12. Summa so'z bilan:")
+    await state.set_state(ContractForm.summa_soz)
 
 @dp.message(ContractForm.summa_soz)
 async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
     
-    # Shablon tanlash logikasi
     shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
     xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     shablon_nomi = f"{shaxs}_{xizmat}.docx"
@@ -114,18 +122,25 @@ async def final_render(m: Message, state: FSMContext):
         else:
             await m.answer(f"❌ Fayl topilmadi: {shablon_nomi}")
     except Exception as e:
-        # Word xatosi bo'lsa bot o'chib qolmaydi, sizga aytadi
         await m.answer(f"⚠️ Shabloningizda xato bor: {str(e)}\nIltimos, Word fayldagi {{ }} belgilarini tekshiring.")
     
     await state.clear()
 
-# Render uchun Live xizmati (Bot o'chib qolmasligi uchun)
-async def handle(r): return web.Response(text="Live")
+# Render uyquga ketmasligi uchun va xatolarni oldini olish uchun web-server
+async def handle(r): return web.Response(text="Bot is running")
 async def main():
-    app = web.Application(); app.router.add_get("/", handle)
-    runner = web.AppRunner(app); await runner.setup()
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
-    await site.start(); await dp.start_polling(bot)
+    await site.start()
+    
+    # Botni ishga tushirish
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
