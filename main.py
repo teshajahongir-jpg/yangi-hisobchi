@@ -121,7 +121,7 @@ async def final_render(m: Message, state: FSMContext):
         if os.path.exists(shablon_nomi):
             doc = DocxTemplate(shablon_nomi)
             doc.render(data)
-            out = "Amaan mijozlar bilan shartnoma.docx"
+            out = f"{data.get('raqam', 'shartnoma').replace('/', '-')}.docx"
             doc.save(out)
             await m.answer_document(FSInputFile(out), caption="✅ Tayyor!")
             os.remove(out)
