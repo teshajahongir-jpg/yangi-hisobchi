@@ -1,4 +1,5 @@
-import os, asyncio, re
+import os, asyncio, re, requests
+from bs4 import BeautifulSoup
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
@@ -10,7 +11,19 @@ from aiohttp import web
 TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-
+def get_org_info(stir):
+    try:
+        url = f"https://orginfo.uz/uz/search/all/?q={stir}"
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            name_tag = soup.find('h5')
+            if name_tag:
+                full_text = name_tag.text.strip()
+                # 9 ta raqamni (STIRni) olib tashlab, faqat nomni qoldiradi
+                return re.sub(r'\d{9}', '', full_text).replace('-', '').strip()
+    except: pass
+    return None
 class ContractForm(StatesGroup):
     shaxs_turi = State()
     xizmat_turi = State()
