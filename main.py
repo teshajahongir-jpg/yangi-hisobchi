@@ -7,6 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
 
+# TOKEN
 TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -43,7 +44,7 @@ async def select_shaxs(m: Message, state: FSMContext):
 @dp.message(ContractForm.xizmat_turi)
 async def ask_rekvizitlar(m: Message, state: FSMContext):
     await state.update_data(xizmat_turi=m.text)
-    await m.answer("📝 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
+    await m.answer("📝 Rekvizitlar jadvalini tashlang (Nusxa olib):", reply_markup=ReplyKeyboardRemove())
     await state.set_state(ContractForm.rekvizitlar)
 
 @dp.message(ContractForm.rekvizitlar)
@@ -55,7 +56,6 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
             if match: return match.group(1).strip()
         return "-"
     
-    # Rekvizitlarni tushunish
     lines = t.split('\n')
     mijoz = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
     
@@ -64,7 +64,7 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
         stir=get_val(["INN", "STIR", "ИНН", "Pasport", "ПАСПОРТ"], t),
         xr=get_val(["H/R", "XR", "X/P", "Hisob", "Ҳ/Р"], t).replace(" ", ""),
         mfo=get_val(["MFO", "МФО"], t).replace(" ", ""),
-        direktor=get_v(["Direktor", "Директор", "F.I.SH", "Ф.И.Ш"], t) if "Yuridik" in (await state.get_data())['shaxs_turi'] else mijoz,
+        direktor=get_val(["Direktor", "Директор", "F.I.SH", "Ф.И.Ш"], t),
         manzil=get_val(["Manzil", "Манзил"], t)
     )
     await m.answer("✅ 7. Shartnoma raqami:")
@@ -84,7 +84,7 @@ async def p_tovar(m: Message, state: FSMContext):
 
 @dp.message(ContractForm.sinf)
 async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text); await m.answer("11. Summa (raqamda):"); await state.set_state(ContractForm.summa)
+    await state.update_data(sinf=m.text); await m.answer("11. Summa (faqat raqamda):"); await state.set_state(ContractForm.summa)
 
 @dp.message(ContractForm.summa)
 async def p_summa(m: Message, state: FSMContext):
@@ -98,7 +98,7 @@ async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
     
-    # Shablonni tanlash
+    # Shablon tanlash logikasi
     shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
     xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
     shablon_nomi = f"{shaxs}_{xizmat}.docx"
@@ -107,20 +107,19 @@ async def final_render(m: Message, state: FSMContext):
         if os.path.exists(shablon_nomi):
             doc = DocxTemplate(shablon_nomi)
             doc.render(data)
-            
-            # Fayl nomini siz aytgandek qildik
             output_name = "Amaan mijozlar bilan shartnoma.docx"
             doc.save(output_name)
-            
             await m.answer_document(FSInputFile(output_name), caption="✅ Shartnoma tayyor!")
             os.remove(output_name)
         else:
-            await m.answer(f"❌ Xato: {shablon_nomi} fayli topilmadi!")
+            await m.answer(f"❌ Fayl topilmadi: {shablon_nomi}")
     except Exception as e:
+        # Word xatosi bo'lsa bot o'chib qolmaydi, sizga aytadi
         await m.answer(f"⚠️ Shabloningizda xato bor: {str(e)}\nIltimos, Word fayldagi {{ }} belgilarini tekshiring.")
     
     await state.clear()
 
+# Render uchun Live xizmati (Bot o'chib qolmasligi uchun)
 async def handle(r): return web.Response(text="Live")
 async def main():
     app = web.Application(); app.router.add_get("/", handle)
