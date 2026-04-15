@@ -2,3 +2,5 @@ aiogram
 docxtpl
 python-docx
 aiohttp
+requests
+beautifulsoup4
