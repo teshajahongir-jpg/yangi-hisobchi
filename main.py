@@ -14,19 +14,23 @@ dp = Dispatcher(storage=MemoryStorage())
 def get_org_info(stir):
     try:
         url = f"https://orginfo.uz/uz/search/all/?q={stir}"
-        res = requests.get(url, timeout=5)
+        # Sayt botni bloklamasligi uchun "User-Agent" qo'shamiz
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        res = requests.get(url, headers=headers, timeout=10)
+        
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            name_tag = soup.find('h5')
+            # Korxona nomini qidirish (h5, h6 yoki a teglaridan)
+            name_tag = soup.find(['h5', 'h6', 'a'], class_=lambda x: x != 'navbar-brand')
+            
             if name_tag:
                 full_text = name_tag.text.strip()
-                # 9 ta raqamni (STIRni) olib tashlab, faqat nomni qoldiradi
-                return re.sub(r'\d{9}', '', full_text).replace('-', '').strip()
+                # STIRni olib tashlab, faqat toza nomni qoldirish
+                clean_name = re.sub(r'\d{9}', '', full_text).replace('-', '').strip()
+                if len(clean_name) > 3:
+                    return clean_name
     except: pass
     return None
-class ContractForm(StatesGroup):
-    shaxs_turi = State()
-    xizmat_turi = State()
     rekvizitlar = State()
     raqam = State()
     sana = State()
