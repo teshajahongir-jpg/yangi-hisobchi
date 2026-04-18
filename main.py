@@ -130,25 +130,33 @@ async def final_render(m: Message, state: FSMContext):
     await state.update_data(summa_soz=m.text)
     data = await state.get_data()
     
+    # Tanlangan turga qarab fayl nomini yig'amiz
     shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
     xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
-    shablon_nomi = f"{shaxs}_{xizmat}.docx"
+    
+    # Ikkita variantni tekshiramiz: qavsli (1) va qavssiz
+    nom_qavs = f"{shaxs}_{xizmat} (1).docx"
+    nom_oddiy = f"{shaxs}_{xizmat}.docx"
+    
+    if os.path.exists(nom_qavs):
+        shablon_nomi = nom_qavs
+    elif os.path.exists(nom_oddiy):
+        shablon_nomi = nom_oddiy
+    else:
+        await m.answer(f"❌ Shablon topilmadi: {nom_oddiy}")
+        return
 
     try:
-        if os.path.exists(shablon_nomi):
-            doc = DocxTemplate(shablon_nomi)
-            doc.render(data)
-            out = f"Amaan mijozlar bilan shartnoma {data.get('raqam', 'shartnoma').replace('/', '-')}.docx"
-            doc.save(out)
-            await m.answer_document(FSInputFile(out), caption="✅ Tayyor!")
-            os.remove(out)
-        else:
-            await m.answer(f"❌ {shablon_nomi} topilmadi.")
+        doc = DocxTemplate(shablon_nomi)
+        doc.render(data)
+        out = f"Amaan mijozlar bilan shartnoma {data.get('raqam', 'shartnoma').replace('/', '-')}.docx"
+        doc.save(out)
+        await m.answer_document(FSInputFile(out), caption="✅ Marhamat, shartnoma tayyor!")
+        os.remove(out)
     except Exception as e:
         await m.answer(f"⚠️ Word shablonda xato: {str(e)}")
     
     await state.clear()
-
 async def handle(r): return web.Response(text="Bot Live")
 async def main():
     app = web.Application(); app.router.add_get("/", handle)
