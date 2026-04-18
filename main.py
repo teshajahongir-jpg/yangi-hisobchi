@@ -78,8 +78,8 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
     # Ma'lumotlarni aqlli qidirish funksiyasi
     def find_data(keywords, text):
         for k in keywords:
-            # Ikkita nuqta bilan yoki nuqtasiz probeldan keyingi qismni oladi
-            pattern = fr"{k}[:\s]+([\w\d\s\-\/]+)"
+            # Nuqta, vergul va uzun ismlarni ham olish uchun regex
+            pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/.,‘“"”]+))"
             match = re.search(pattern, text, re.I)
             if match:
                 res = match.group(1).strip().split('\n')[0]
@@ -88,15 +88,27 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
 
     lines = t.split('\n')
     # Korxona nomi birinchi qatorda bo'ladi
-    mijoz_nomi = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").replace("\"", "").strip()
-    
+    mijoz_nomi = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").replace('"', "").strip()
+
     # Rekvizitlarni ajratib olish
     stir = find_data(["INN", "STIR", "ИНН", "Pasport", "ПАСПОРТ"], t)
-    # Hisob raqam uchun barcha variantlar (X/P, H/R, Hisob)
-    xr = find_data(["X/P", "H/R", "XR", "Hisob", "Ҳ/Р", "Х/Р"], t).replace(" ", "")
-    mfo = find_data(["MFO", "МФО"], t).replace(" ", "")
+    xr = find_data(["X/P", "H/R", "XR", "Hisob", "X/p"], t).replace(" ", "")
+    mfo = find_data(["MFO", "МФО"], t).strip()
     manzil = find_data(["Manzil", "Манзил", "Адрес"], t)
-    direktor = find_data(["Direktor", "Директор", "F.I.SH", "Раҳбар"], t)
+    direktor = find_data(["Direktor", "Директор", "F.I.SH", "Рахбар"], t)
+
+    # Ma'lumotlarni saqlash (faqat bitta blok bo'lishi shart!)
+    await state.update_data(
+        mijoz=mijoz_nomi,
+        stir=stir,
+        xr=xr,
+        mfo=mfo,
+        manzil=manzil,
+        direktor=direktor
+    )
+    
+    await m.answer("✅ Rekvizitlar to'liq olindi.\n\n7. Shartnoma raqamini kiriting:")
+    await state.set_state(ContractForm.raqam) t)
 
     await state.update_data(
         mijoz=mijoz_nomi,
