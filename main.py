@@ -79,7 +79,7 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
     def find_data(keywords, text):
         for k in keywords:
             # Nuqta, vergul va uzun ismlarni ham olish uchun regex
-            pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/.,‘“"”]+))"
+          pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/.,'\" ]+))"
             match = re.search(pattern, text, re.I)
             if match:
                 res = match.group(1).strip().split('\n')[0]
