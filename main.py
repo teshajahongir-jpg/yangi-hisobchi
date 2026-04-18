@@ -75,32 +75,25 @@ async def ask_rekvizitlar(m: Message, state: FSMContext):
 async def process_rekvizitlar(m: Message, state: FSMContext):
     t = m.text
     
-    # Ma'lumotlarni aqlli qidirish funksiyasi
     def find_data(keywords, text):
         for k in keywords:
-            # Nuqta, vergul va uzun ismlarni ham olish uchun regex
-      
-        pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/.,'\" ]+))"
-       
-        match = re.search(pattern, text, re.I)
-       
-        if match:
+            # Standart va maxsus belgilarni to'g'ri o'qiydigan regex
+            pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/.,'\" ]+))"
+            match = re.search(pattern, text, re.I)
+            if match:
                 res = match.group(1).strip().split('\n')[0]
                 return res
         return "-"
 
     lines = t.split('\n')
-    # Korxona nomi birinchi qatorda bo'ladi
     mijoz_nomi = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").replace('"', "").strip()
 
-    # Rekvizitlarni ajratib olish
     stir = find_data(["INN", "STIR", "ИНН", "Pasport", "ПАСПОРТ"], t)
     xr = find_data(["X/P", "H/R", "XR", "Hisob", "X/p"], t).replace(" ", "")
     mfo = find_data(["MFO", "МФО"], t).strip()
     manzil = find_data(["Manzil", "Манзил", "Адрес"], t)
-    direktor = find_data(["Direktor", "Директор", "F.I.SH", "Рахбар"], t)
+    direktor = find_data(["Direktor", "Директор", "F.I.SH", "Рахbar"], t)
 
-    # Ma'lumotlarni saqlash (faqat bitta blok bo'lishi shart!)
     await state.update_data(
         mijoz=mijoz_nomi,
         stir=stir,
@@ -111,8 +104,7 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
     )
     
     await m.answer("✅ Rekvizitlar to'liq olindi.\n\n7. Shartnoma raqamini kiriting:")
-    await state.set_state(ContractForm.raqam) t)
-
+    await state.set_state(ContractForm.raqam)
     await state.update_data(
         mijoz=mijoz_nomi,
         stir=stir,
