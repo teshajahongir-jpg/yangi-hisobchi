@@ -1,5 +1,4 @@
 import os, asyncio, re, requests
-from bs4 import BeautifulSoup
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
@@ -7,17 +6,26 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from docxtpl import DocxTemplate
 from aiohttp import web
+from bs4 import BeautifulSoup
 
 TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+# REKVIZITLAR UCHUN HOLATLAR (STATE)
+class ContractForm(StatesGroup):
+    shaxs_turi = State()
+    xizmat_turi = State()
+    rekvizitlar = State()
+    raqam = State()
+    sana = State()
+    tovar_nomi = State()
+    sinf = State()
+    summa = State()
+    summa_soz = State()
+
 def get_org_info(stir):
     try:
-        url = f"https://orginfo.uz/uz/search/all/?q={stir}"
-        # Sayt botni bloklamasligi uchun "User-Agent" qo'shamiz
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-        res = requests.get(url, headers=headers, timeout=10)
-        
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             # Korxona nomini qidirish (h5, h6 yoki a teglaridan)
