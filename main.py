@@ -57,15 +57,13 @@ async def cmd_start(m: Message, state: FSMContext):
 
 @dp.message(F.text.in_(["🏢 Yuridik shaxs", "👤 Jismoniy shaxs"]))
 async def select_shaxs(m: Message, state: FSMContext):
-  kb = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="⚡️ 1 oylik tezkor"), KeyboardButton(text="📅 7 oylik")],
-            [KeyboardButton(text="🔍 Expert tekshiruv")],
-            [KeyboardButton(text="🛠 Expert tekshiruv plus xizmat kursatish")] # YANGI TUGMA
-        ], resize_keyboard=True)
+    kb = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="⚡️ 1 oylik tezkor"), KeyboardButton(text="📅 7 oylik")],
+        [KeyboardButton(text="🔍 Expert tekshiruv")],
+        [KeyboardButton(text="🛠 Expert tekshiruv plus xizmat kursatish")]
+    ], resize_keyboard=True)
     await m.answer("Xizmat turini tanlang:", reply_markup=kb)
     await state.set_state(ContractForm.xizmat_turi)
-
-@dp.message(ContractForm.xizmat_turi)
 async def ask_rekvizitlar(m: Message, state: FSMContext):
     await state.update_data(xizmat_turi=m.text)
     await m.answer("📝 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
