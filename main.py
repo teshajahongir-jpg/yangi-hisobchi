@@ -46,7 +46,6 @@ def get_org_info(stir):
     sinf = State()
     summa = State()
     summa_soz = State()
-
 @dp.message(F.text == "/start")
 async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
@@ -158,5 +157,5 @@ async def final_render(m: Message, state: FSMContext):
         await m.answer_document(FSInputFile(file_path), caption="✅ Shartnoma tayyor!")
         if os.path.exists(file_path): os.remove(file_path)
     except Exception as e:
-        await m.answer(f"❌ Xatolik: {e}")
+        await m.answer(f"❌ Xatolik yuz berdi: {e}")
     await state.clear()
