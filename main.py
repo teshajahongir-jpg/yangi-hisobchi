@@ -57,11 +57,11 @@ async def cmd_start(m: Message, state: FSMContext):
 
 @dp.message(F.text.in_(["🏢 Yuridik shaxs", "👤 Jismoniy shaxs"]))
 async def select_shaxs(m: Message, state: FSMContext):
-    await state.update_data(shaxs_turi=m.text)
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="⚡️ 1 oylik tezkor"), KeyboardButton(text="📅 7 oylik")],
-        [KeyboardButton(text="🔍 Expert tekshiruv")]
-    ], resize_keyboard=True)
+  kb = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="⚡️ 1 oylik tezkor"), KeyboardButton(text="📅 7 oylik")],
+            [KeyboardButton(text="🔍 Expert tekshiruv")],
+            [KeyboardButton(text="🛠 Expert tekshiruv plus xizmat kursatish")] # YANGI TUGMA
+        ], resize_keyboard=True)
     await m.answer("Xizmat turini tanlang:", reply_markup=kb)
     await state.set_state(ContractForm.xizmat_turi)
 
@@ -77,14 +77,12 @@ async def process_rekvizitlar(m: Message, state: FSMContext):
     
     def find_data(keywords, text):
         for k in keywords:
-            # Standart va maxsus belgilarni to'g'ri o'qiydigan regex
-            pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/.,'\" ]+))"
-            match = re.search(pattern, text, re.I)
-            if match:
-                res = match.group(1).strip().split('\n')[0]
-                return res
-        return "-"
-
+        # Standart va maxsus belgilarni to'g'ri o'qiydigan regex
+        pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/\.,\'\" ]+))"
+        match = re.search(pattern, text, re.I)
+        if match:
+            res = match.group(1).strip().split('\n')[0]
+            return res
     lines = t.split('\n')
     mijoz_nomi = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").replace('"', "").strip()
 
@@ -146,20 +144,33 @@ async def final_render(m: Message, state: FSMContext):
     data = await state.get_data()
     
     # Tanlangan turga qarab fayl nomini yig'amiz
-    shaxs = "yu" if "Yuridik" in data['shaxs_turi'] else "jis"
-    xizmat = "tezkor" if "1 oylik" in data['xizmat_turi'] else "7oy" if "7 oylik" in data['xizmat_turi'] else "expert"
+  # 149-qator: Tanlangan xizmat turini aniqlash
+    xizmat_nomi = data.get('xizmat_turi', '')
+    shaxs = "yu" if "Yuridik" in data.get('shaxs_turi', '') else "jis"
     
-    # Ikkita variantni tekshiramiz: qavsli (1) va qavssiz
-    nom_qavs = f"{shaxs}_{xizmat} (1).docx"
-    nom_oddiy = f"{shaxs}_{xizmat}.docx"
-    
-    if os.path.exists(nom_qavs):
-        shablon_nomi = nom_qavs
-    elif os.path.exists(nom_oddiy):
-        shablon_nomi = nom_oddiy
+    # Yangi shablon mantiqi
+    if "plus" in xizmat_nomi.lower():
+        shablon_nomi = "expert_plus.docx"
+    elif "1 oylik" in xizmat_nomi:
+        shablon_nomi = f"{shaxs}_tezkor.docx"
+    elif "7 oylik" in xizmat_nomi:
+        shablon_nomi = f"{shaxs}_7oy.docx"
     else:
-        await m.answer(f"❌ Shablon topilmadi: {nom_oddiy}")
-        return
+        shablon_nomi = f"{shaxs}_expert.docx"
+
+    # 155-qator atrofida: Shablon borligini tekshirish
+    if not os.path.exists(shablon_nomi):
+        # Agar qavsli varianti bo'lsa (masalan: yu_tezkor (1).docx)
+        qavsli = shablon_nomi.replace(".docx", " (1).docx")
+        if os.path.exists(qavsli):
+            shablon_nomi = qavsli
+        else:
+            await m.answer(f"❌ Shablon topilmadi: {shablon_nomi}")
+            return
+
+    # Wordni yaratish
+    doc = DocxTemplate(shablon_nomi)
+    doc.render(data)
 
     try:
         doc = DocxTemplate(shablon_nomi)
