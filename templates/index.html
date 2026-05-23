@@ -27,6 +27,9 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
 
+        // Foydalanuvchi ID sini Telegram WebApp'dan olish
+        const userId = tg.initDataUnsafe?.user?.id || 0;
+
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const snapBtn = document.getElementById('snap');
@@ -42,34 +45,49 @@
                 snapBtn.disabled = true;
             });
 
-        snapBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Jo'natilmoqda...";
+        snapBtn.addEventListener('click', async () => {
+            statusDiv.innerText = "Rasm serverga yuborilmoqda...";
             snapBtn.disabled = true;
 
             const context = canvas.getContext('2d');
-            canvas.width = video.videoWidth || 400;
-            canvas.height = video.videoHeight || 300;
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            canvas.width = 400;
+            canvas.height = 300;
+            context.drawImage(video, 0, 0, 400, 300);
 
-            // Sifatini 0.5 qildik — rasm og'irligi kamayadi va tez ketadi
-            const imageData = canvas.toDataURL('image/jpeg', 0.5);
+            const imageData = canvas.toDataURL('image/jpeg', 0.4);
 
             const urlParams = new URLSearchParams(window.location.search);
             const mode = urlParams.get('mode') || 'start';
 
-            const payload = {
-                image: imageData,
-                mode: mode
-            };
-
+            // Telegram orqali emas, to'g'ridan-to'g'ri internet orqali Render serverga yuborish
             try {
-                // Telegramga ma'lumot uzatish
-                tg.sendData(JSON.stringify(payload));
-                statusDiv.innerText = "Muvaffaqiyatli jo'natildi!";
-                setTimeout(() => { tg.close(); }, 500);
+                const response = await fetch('/upload_photo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        image: imageData,
+                        mode: mode
+                    })
+                });
+
+                if (response.ok) {
+                    statusDiv.innerText = "✅ Muvaffaqiyatli yuborildi! Botga qaytishingiz mumkin.";
+                    setTimeout(() => { tg.close(); }, 800);
+                } else {
+                    statusDiv.innerText = "❌ Server qabul qilmadi. Qayta urining.";
+                    snapBtn.disabled = false;
+                }
             } catch (e) {
-                statusDiv.innerText = "Xatolik: Telegram qabul qilmadi. Qayta urinib ko'ring.";
-                snapBtn.disabled = false;
+                // Agar internet orqali ham ketmasa, Telegram o'ziga tashlab ko'radi
+                try {
+                    tg.sendData(JSON.stringify({ image: imageData, mode: mode }));
+                    statusDiv.innerText = "Muvaffaqiyatli jo'natildi!";
+                    setTimeout(() => { tg.close(); }, 500);
+                } catch (err) {
+                    statusDiv.innerText = "Aloqa xatosi! Internetni tekshiring.";
+                    snapBtn.disabled = false;
+                }
             }
         });
     </script>
