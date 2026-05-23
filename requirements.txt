@@ -1,2 +1,4 @@
 aiogram
-   pytz
+pytz
+gspread
+google-auth
