@@ -5,14 +5,13 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
 
-# 🚨 ASOSIY SOZLAMALAR (Siz bergan ma'lumotlar joylashtirildi)
+# 🚨 ASOSIY SOZLAMALAR
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 
-# 📍 ISHXONA LOKATSIYASI (Koordinatalari)
-# Hozirda taxminiy Buxoro koordinatalari qo'yildi.
-ISHXONA_LAT = 39.7747  
-ISHXONA_LON = 64.4286  
+# 📍 ISHXONA ANIQLANGAN LOKATSIYASI
+ISHXONA_LAT = 39.745430  
+ISHXONA_LON = 64.439307  
 RUXSAT_MASOFA = 100  # Ishxonadan necha metrgacha uzoqlikda bosishga ruxsat (metrda)
 
 bot = Bot(token=BOT_TOKEN)
