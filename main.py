@@ -1,6 +1,7 @@
 import os
 import pytz
 import gspread
+import asyncio
 from google.oauth2.service_account import Credentials
 from math import radians, cos, sin, asin, sqrt
 from datetime import datetime
@@ -15,36 +16,34 @@ BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 GOOGLE_JADVAL_ID = "1tCGJQuk9MJ-DZ5JuKMPlxoPPTNdvsVktgU_hYS3A90" 
 
-# 📍 ISHXONA LOKATSIYASI VA MASOFA (Vaqtincha uydan sinash uchun 5000 metr qilindi)
+# 📍 LOKATSIYANI TEKSHIRISH (Uydan sinash uchun 5000 metr)
 ISHXONA_LAT = 39.745430  
 ISHXONA_LON = 64.439307  
-RUXSAT_MASOFA = 5000  # Ishxonada ekanligini tekshirish radiusi (metrda)
+RUXSAT_MASOFA = 5000  
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 UZ_TZ = pytz.timezone('Asia/Tashkent')
 
-# Ma'lumotlar bazasi (Xotirada saqlanadi)
+# Ma'lumotlar bazasi (Xotirada)
 xodimlar_bazasi = {} 
 ishchilar_baza = {}
 
 class Registration(StatesGroup):
     ism_kutish = State()
 
-# GOOGLE JADVALGA YOZISH FUNKSIYASI (MUKAMMAL QIDIRUV)
-def jadvalga_kechikish_yoz(xodim_ismi, kechikkan_minut):
+# GOOGLE JADVAL BILAN BLOKLAMSDAN ISHLASH
+def _sing_jadvalga_yoz(xodim_ismi, kechikkan_minut):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        # DIQQAT: credentials.json fayli GitHub loyihangizda bo'lishi shart!
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
         client = gspread.authorize(creds)
         sheet = client.open_by_key(GOOGLE_JADVAL_ID).sheet1
         
-        # A ustunidagi barcha ismlarni yuklab olamiz
         ismlar_ustuni = sheet.col_values(1)
-        
         row = None
-        # Ismlarni katta-kichik harfiga qaramasdan va probellardan tozalab qidiramiz
         for index, name in enumerate(ismlar_ustuni):
             if name.strip().lower() == xodim_ismi.strip().lower():
                 row = index + 1
@@ -54,22 +53,24 @@ def jadvalga_kechikish_yoz(xodim_ismi, kechikkan_minut):
             qoshiladigan_soat = kechikkan_minut // 60
             qoshiladigan_minut = kechikkan_minut % 60
             
-            # Minutni yangilash (B ustun - 2)
             if qoshiladigan_minut > 0:
                 joriy_minut = int(sheet.cell(row, 2).value or 0)
                 sheet.update_cell(row, 2, joriy_minut + qoshiladigan_minut)
                 
-            # Soatni yangilash (C ustun - 3)
             if qoshiladigan_soat > 0:
                 joriy_soat = int(sheet.cell(row, 3).value or 0)
                 sheet.update_cell(row, 3, joriy_soat + qoshiladigan_soat)
             return True
         return False
     except Exception as e:
-        print(f"Jadval xatosi: {e}")
+        print(f"Google Sheets jiddiy xatolik: {e}")
         return False
 
-# Masofani hisoblash (Haversine)
+# Sinxron funksiyani asinxron zanjirga o'tkazish
+async def jadvalga_kechikish_yoz(xodim_ismi, kechikkan_minut):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _sing_jadvalga_yoz, xodim_ismi, kechikkan_minut)
+
 def masofani_hisobla(lat1, lon1, lat2, lon2):
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1 
@@ -96,7 +97,7 @@ def admin_klaviatura():
 @dp.message(F.text == "/start")
 async def cmd_start(m: Message, state: FSMContext):
     user_id = m.from_user.id
-    await state.clear()
+    await state.clear()  
     
     if user_id == ADMIN_ID:
         xodimlar_bazasi[user_id] = {"ism": "Jahongir (Admin)", "status": "approved"}
@@ -112,8 +113,8 @@ async def cmd_start(m: Message, state: FSMContext):
             await m.answer("⏳ Ro'yxatdan o'tishingiz admin tomonidan ko'rib chiqilmoqda...")
     else:
         await m.answer("📌 Tizimdan foydalanish uchun ro'yxatdan o'tishingiz kerak.\n\n"
-                       "Iltimos, **Google jadvaldagi ismingizni** qanday yozilgan bo'lsa shunday yuboring:\n"
-                       "(Masalan: Sevinch, Charos, Ozodbek, Xudoyorxon...)")
+                       "Iltimos, **Google jadvaldagi ismingizni** kiriting:\n"
+                       "(Masalan: Sevinch, Charos, Ozodbek...)")
         await state.set_state(Registration.ism_kutish)
 
 @dp.message(Registration.ism_kutish)
@@ -133,15 +134,18 @@ async def process_name(m: Message, state: FSMContext):
             InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rej_{user_id}")
         ]
     ])
-    await bot.send_message(
-        ADMIN_ID, 
-        f"🔔 **Yangi xodim ro'yxatdan o'tmoqchi!**\n\n"
-        f"👤 Telegram ismi: {m.from_user.full_name}\n"
-        f"🔗 Username: {username}\n"
-        f"📝 Jadvaldagi ismi: **{xodim_ismi}**\n\n"
-        f"Ushbu xodimga ruxsat berasizmi?",
-        reply_markup=kb
-    )
+    try:
+        await bot.send_message(
+            ADMIN_ID, 
+            f"🔔 **Yangi xodim ro'yxatdan o'tmoqchi!**\n\n"
+            f"👤 Telegram ismi: {m.from_user.full_name}\n"
+            f"🔗 Username: {username}\n"
+            f"📝 Jadvaldagi ismi: **{xodim_ismi}**\n\n"
+            f"Ushbu xodimga ruxsat abrasizmi?",
+            reply_markup=kb
+        )
+    except Exception as e:
+        print(f"Adminga xabar yuborishda xato: {e}")
 
 @dp.callback_query(F.data.startswith("app_"))
 async def approve_user(call: CallbackQuery):
@@ -166,6 +170,9 @@ async def reject_user(call: CallbackQuery):
 async def handle_location(m: Message):
     user_id = m.from_user.id
     
+    if user_id == ADMIN_ID and user_id not in xodimlar_bazasi:
+        xodimlar_bazasi[user_id] = {"ism": "Jahongir (Admin)", "status": "approved"}
+
     if user_id not in xodimlar_bazasi or xodimlar_bazasi[user_id].get("status") != "approved":
         await m.answer("⚠️ Botdan foydalanish uchun avval ro'yxatdan o'ting! /start bosing.")
         return
@@ -184,7 +191,6 @@ async def handle_location(m: Message):
     if user_id not in ishchilar_baza:
         ishchilar_baza[user_id] = {}
 
-    # 🟢 KELISHNI QAYD ETISH
     if 'start' not in ishchilar_baza[user_id] or 'end' in ishchilar_baza[user_id]:
         ishchilar_baza[user_id]['start'] = hozir
         if 'end' in ishchilar_baza[user_id]:
@@ -192,10 +198,10 @@ async def handle_location(m: Message):
             
         matn = f"🟢 Kelgan vaqtingiz yozib olindi: **{hozir.strftime('%H:%M:%S')}**\n"
         
-        # Smena 09:00 da boshlanadi, kechikishni hisoblaymiz
         if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
             kechikkan_minut = (hozir.hour - 9) * 60 + hozir.minute
-            muvaffaqiyatli = jadvalga_kechikish_yoz(xodim_haqiqiy_ismi, kechikkan_minut)
+            
+            muvaffaqiyatli = await jadvalga_kechikish_yoz(xodim_haqiqiy_ismi, kechikkan_minut)
             
             soat_qismi = kechikkan_minut // 60
             minut_qismi = kechikkan_minut % 60
@@ -203,13 +209,11 @@ async def handle_location(m: Message):
             if muvaffaqiyatli:
                 matn += f"⚠️ Siz bugun ishga **{soat_qismi} soat, {minut_qismi} minut** kechikdingiz. Ma'lumot jadvalga qo'shildi!"
             else:
-                matn += f"⚠️ Siz bugun ishga kechikdingiz, lekin **'{xodim_haqiqiy_ismi}'** ismi jadvaldan topilmadi! Jadvaldagi ism imlosini tekshiring."
+                matn += f"⚠️ Siz bugun ishga kechikdingiz, lekin **'{xodim_haqiqiy_ismi}'** ismi jadvaldan topilmadi! `credentials.json` fayli yuklanganini tekshiring."
         else:
             matn += "✅ Vaqtida keldingiz, barakalla!"
             
         await m.answer(matn)
-        
-    # 🔴 KETISHNI QAYD ETISH
     else:
         start_vaqt = ishchilar_baza[user_id]['start']
         yakun_vaqt = hozir
@@ -218,7 +222,6 @@ async def handle_location(m: Message):
         farq = yakun_vaqt - start_vaqt
         jami_sekund = farq.total_seconds()
         
-        # Obed vaqtini (13:00 - 14:00) chegirib tashlash
         if start_vaqt.hour < 13 and yakun_vaqt.hour >= 14:
             jami_sekund -= 3600  
             
@@ -226,13 +229,27 @@ async def handle_location(m: Message):
         minut = int((jami_sekund % 3600) // 60)
         await m.answer(f"🏁 Ish yakunlandi!\n📅 Bugungi sof ish vaqtingiz: **{soat} soat, {minut} minut**.")
 
-# Bo'sh handlerlar (Xatolik bermasligi uchun)
 @dp.message(F.text.in_({"📊 Mening bugungi hisobotim", "👑 Barcha xodimlar hisoboti"}))
 async def handle_reports(m: Message):
     await m.answer("📊 Hisobot tizimi tez orada to'liq ishga tushadi.")
 
+# 🌐 RENDER PORT TIMEOUT UCHUN SOXTA SERVER
+async def start_fake_server():
+    port = int(os.environ.get("PORT", 8080))
+    async def handle(reader, writer):
+        data = await reader.read(100)
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+        await writer.drain()
+        writer.close()
+    server = await asyncio.start_server(handle, '0.0.0.0', port)
+    async with server:
+        await server.serve_forever()
+
 async def main():
-    await dp.start_polling(bot)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        start_fake_server()
+    )
 
 if __name__ == "__main__":
     import asyncio
