@@ -5,8 +5,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
 
 # 🚨 SOZLAMALAR
-BOT_TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
-ADMIN_ID = 123456789  # Bu yerga o'zingizning Telegram ID raqamingizni yozing (tirnoqsiz, faqat raqam)
+BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
+ADMIN_ID = 8252424738  # Bu yerga o'zingizning Telegram ID raqamingizni yozing (tirnoqsiz, faqat raqam)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -27,7 +27,7 @@ def admin_klaviatura():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🟢 Ishni boshlash"), KeyboardButton(text="🔴 Ishni yakunlash")],
         [KeyboardButton(text="📊 Mening bugungi hisobotim")],
-        [KeyboardButton(text="👑 Barcha xodimlar hisoboti")] # Faqat sizga ko'rinadi
+        [KeyboardButton(text="👑 Barcha xodimlar hisoboti")]
     ], resize_keyboard=True)
 
 @dp.message(F.text == "/start")
@@ -59,7 +59,6 @@ async def start_work(m: Message):
         }
         
     ishchilar_baza[user_id]['start'] = hozir
-    # Agar adashib qayta bossa, eski 'end'ni o'chiradi
     if 'end' in ishchilar_baza[user_id]:
         del ishchilar_baza[user_id]['end']
         
@@ -78,12 +77,10 @@ async def end_work(m: Message):
     yakun_vaqt = hozir
     ishchilar_baza[user_id]['end'] = yakun_vaqt
     
-    # Sof vaqtni hisoblash
     farq = yakun_vaqt - start_vaqt
     jami_sekund = farq.total_seconds()
     
     obed_ayrildi = False
-    # Agar 13:00 dan oldin kelib, 14:00 dan keyin ketayotgan bo'lsa, 1 soat (3600 sekund) obedni ayiramiz
     if start_vaqt.hour < 13 and yakun_vaqt.hour >= 14:
         jami_sekund -= 3600
         obed_ayrildi = True
@@ -116,13 +113,12 @@ async def xodim_report(m: Message):
     
     if 'end' in data:
         matn += f"🔴 Ketgan vaqt: {data['end'].strftime('%H:%M:%S')}\n"
-        matn += f"⏱ Sof ish vaqti: {data.get('sof_soat', '-')}"
+        matn += f"⏱ Sof ish vaqthi: {data.get('sof_soat', '-')}"
     else:
         matn += "⏳ Ishingiz hali davom etmoqda..."
         
     await m.answer(matn)
 
-# 👑 FAQAT NAZORATCHI (ADMIN) UCHUN BUYRUQ
 @dp.message(F.text == "👑 Barcha xodimlar hisoboti")
 async def admin_report(m: Message):
     if m.from_user.id != ADMIN_ID:
