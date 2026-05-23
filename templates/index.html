@@ -8,8 +8,8 @@
     <style>
         body { font-family: sans-serif; text-align: center; background: #f4f6f9; margin: 0; padding: 20px; }
         h3 { color: #333; }
-        video, canvas { width: 100%; max-width: 400px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); background: #000; }
-        button { background: #248b65; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; margin-top: 15px; font-weight: bold; width: 100%; max-width: 400px; }
+        video, canvas { width: 100%; max-width: 360px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); background: #000; }
+        button { background: #248b65; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; margin-top: 15px; font-weight: bold; width: 100%; max-width: 360px; }
         button:disabled { background: #ccc; }
         #status { margin-top: 10px; color: #666; font-size: 14px; }
     </style>
@@ -25,50 +25,52 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Oynani to'liq ochish
+        tg.expand();
 
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const snapBtn = document.getElementById('snap');
         const statusDiv = document.getElementById('status');
 
-        // Kamerani ishga tushirish
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+        navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300, facingMode: "user" }, audio: false })
             .then(stream => {
                 video.srcObject = stream;
                 statusDiv.innerText = "Kamera tayyor. Yuzingiz aniq ko'rinsin!";
             })
             .catch(err => {
-                statusDiv.innerText = "Xatolik: Kameraga ruxsat berilmadi yoki kamera topilmadi!";
+                statusDiv.innerText = "Kamera ochilmadi! Ruxsat berilganini tekshiring.";
                 snapBtn.disabled = true;
             });
 
-        // Rasmni olish va Botga yuborish
         snapBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Rasm ishlov berilmoqda...";
+            statusDiv.innerText = "Jo'natilmoqda...";
             snapBtn.disabled = true;
 
             const context = canvas.getContext('2d');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+            canvas.width = video.videoWidth || 400;
+            canvas.height = video.videoHeight || 300;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Rasmni Base64 formatga o'tkazish
-            const imageData = canvas.toDataURL('image/jpeg', 0.7);
+            // Sifatini 0.5 qildik — rasm og'irligi kamayadi va tez ketadi
+            const imageData = canvas.toDataURL('image/jpeg', 0.5);
 
-            // URL parametrlaridan kelish yoki ketish rejimini aniqlash
             const urlParams = new URLSearchParams(window.location.search);
             const mode = urlParams.get('mode') || 'start';
 
-            // Telegram Botga ma'lumotni qaytarish
             const payload = {
                 image: imageData,
                 mode: mode
             };
 
-            tg.sendData(JSON.stringify(payload));
-            statusDiv.innerText = "Muvaffaqiyatli jo'natildi! Oyna yopilmoqda...";
-            setTimeout(() => { tg.close(); }, 1000);
+            try {
+                // Telegramga ma'lumot uzatish
+                tg.sendData(JSON.stringify(payload));
+                statusDiv.innerText = "Muvaffaqiyatli jo'natildi!";
+                setTimeout(() => { tg.close(); }, 500);
+            } catch (e) {
+                statusDiv.innerText = "Xatolik: Telegram qabul qilmadi. Qayta urinib ko'ring.";
+                snapBtn.disabled = false;
+            }
         });
     </script>
 </body>
