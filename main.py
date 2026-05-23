@@ -34,7 +34,7 @@ ishchilar_baza = {}
 class BotStates(StatesGroup):
     ism_kutish = State()
 
-# GOOGLE JADBAl BILAN BOG'LANISH (Xodimlarni real-time tekshirish uchun)
+# GOOGLE JADVAL BILAN BOG'LANISH
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
@@ -45,7 +45,7 @@ def _jadvaldan_ism_izla(user_id):
     """Foydalanuvchi ID si bo'yicha jadvaldan ismini qidiradi (4-ustun ID uchun)"""
     try:
         sheet = get_google_sheet()
-        id_ustuni = sheet.col_values(4) # 4-ustunga xodimlarni telegram ID sini yozib boramiz
+        id_ustuni = sheet.col_values(4) # 4-ustunda xodimlarning Telegram ID raqami bo'ladi
         for index, tg_id in enumerate(id_ustuni):
             if str(tg_id).strip() == str(user_id):
                 return sheet.cell(index + 1, 1).value # 1-ustundagi Ism
@@ -69,7 +69,7 @@ def _sing_jadvalga_yoz(xodim_ismi, ustun, qiymat, user_id=None):
         if row:
             sheet.update_cell(row, ustun, qiymat)
             if user_id:
-                sheet.update_cell(row, 4, str(user_id)) # Telegram ID ni saqlab qo'yish
+                sheet.update_cell(row, 4, str(user_id)) # Telegram ID ni saqlash
             return True
         return False
     except Exception as e:
@@ -77,6 +77,8 @@ def _sing_jadvalga_yoz(xodim_ismi, ustun, qiymat, user_id=None):
         return False
 
 async def jadvaldan_ism_ol(user_id):
+    if user_id == ADMIN_ID:
+        return "Jahongir (Admin)"
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _jadvaldan_ism_izla, user_id)
 
@@ -104,13 +106,12 @@ async def cmd_start(m: Message, state: FSMContext):
     user_id = m.from_user.id
     await state.clear()
     
+    # ADMIN UCHUN ALOHIDA JADVALSIZ KIRISH
     if user_id == ADMIN_ID:
-        # Adminni jadvalga bog'lab qo'yamiz
-        await jadvalga_yoz("Jahongir (Admin)", 4, str(user_id))
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim to'liq barqaror holatda, IP nazorati faol.", reply_markup=admin_klaviatura())
+        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim mutlaqo xatosiz va tayyor holatda, IP nazorati faol.", reply_markup=admin_klaviatura())
         return
 
-    # Real-time bazadan tekshiramiz
+    # Xodimlarni real-time bazadan tekshiramiz
     xodim_ismi = await jadvaldan_ism_ol(user_id)
     if xodim_ismi:
         await m.answer(f"Xush kelibsiz, {xodim_ismi}! Ish tizimi faol. Kamera orqali tasdiqlang.", reply_markup=xodim_klaviatura())
@@ -126,7 +127,6 @@ async def process_name(m: Message, state: FSMContext):
     await state.clear()
     await m.answer("✅ So'rovingiz adminga yuborildi. Admin tasdiqlashini kuting.")
     
-    # Inline tugma orqali tasdiqlash
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"app_{user_id}_{base64.b64encode(xodim_ismi.encode()).decode()}"),
         InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rej_{user_id}")
@@ -140,14 +140,14 @@ async def approve_user(call: CallbackQuery):
     encoded_name = data_parts[2]
     xodim_ismi = base64.b64decode(encoded_name.encode()).decode()
     
-    # Google jadvalga ID sini yozib qo'yamiz, shu bilan u abadiy bazada qoladi
+    # ID ni jadvalga bog'lash
     muvaffaqiyat = await jadvalga_yoz(xodim_ismi, 4, str(uid))
     
     if muvaffaqiyat:
         await call.message.edit_text(f"✅ {xodim_ismi} muvaffaqiyatli tasdiqlandi va ID jadvalga bog'landi.")
         await bot.send_message(uid, "🎉 Admin sizni tasdiqladi! Endi /start bosing va tizimdan foydalaning.", reply_markup=xodim_klaviatura())
     else:
-        await call.message.edit_text(f"❌ Xatolik: Jadvaldan '{xodim_ismi}' degan ism topilmadi! Oldin ismni jadvalga kiriting.")
+        await call.message.edit_text(f"❌ Xatolik: Jadvaldan '{xodim_ismi}' degan ism topilmadi! Oldin ismni jadvalga kiriting, keyin xodim botdan ro'yxatdan o'tsin.")
 
 @dp.callback_query(F.data.startswith("rej_"))
 async def reject_user(call: CallbackQuery):
@@ -167,13 +167,18 @@ async def process_attendance(user_id, xodim_ismi, mode, hozir, photo_file, is_co
         ishchilar_baza[user_id]['came'] = True
         
         matn = f"🟢 **{xodim_ismi}** ishni boshladi!\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}\n"
-        if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
-            kechikkan_minut = (hozir.hour - 9) * 60 + hozir.minute
-            await jadvalga_yoz(xodim_ismi, 2, f"+{kechikkan_minut} min")
-            matn += f"⚠️ Ishga {kechikkan_minut} minut kechikdi."
+        
+        # Agar admin bo'lsa, jadvalga kechikishni yozib o'tirmaymiz
+        if user_id != ADMIN_ID:
+            if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
+                kechikkan_minut = (hozir.hour - 9) * 60 + hozir.minute
+                await jadvalga_yoz(xodim_ismi, 2, f"+{kechikkan_minut} min")
+                matn += f"⚠️ Ishga {kechikkan_minut} minut kechikdi."
+            else:
+                matn += "✅ Vaqtida keldi."
+                await jadvalga_yoz(xodim_ismi, 2, "Vaqtida")
         else:
-            matn += "✅ Vaqtida keldi."
-            await jadvalga_yoz(xodim_ismi, 2, "Vaqtida")
+            matn += "👑 Admin nazorati."
             
         await bot.send_photo(ADMIN_ID, photo_file, caption=f"🟢 **Ish boshlash tasdiqlandi{suffix}**\n👤 Xodim: {xodim_ismi}\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}\n\n{matn}")
 
@@ -183,12 +188,14 @@ async def process_attendance(user_id, xodim_ismi, mode, hozir, photo_file, is_co
         
         farq_sekund = (hozir - start_vaqt).total_seconds()
         if start_vaqt.hour < 13 and hozir.hour >= 14:
-            farq_sekund -= 3600 # Abed vaqtini ayirib tashlash
+            farq_sekund -= 3600 # Abed vaqti
             
         soat = int(farq_sekund // 3600)
         minut = int((farq_sekund % 3600) // 60)
         
-        await jadvalga_yoz(xodim_ismi, 3, f"{soat} soat {minut} m")
+        if user_id != ADMIN_ID:
+            await jadvalga_yoz(xodim_ismi, 3, f"{soat} soat {minut} m")
+            
         await bot.send_photo(ADMIN_ID, photo_file, caption=f"🔴 **Ish yakunlash tasdiqlandi{suffix}**\n👤 Xodim: {xodim_ismi}\n📅 Ish vaqti: {soat} soat, {minut} m\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}")
 
 # HTML OYNANI KO'RSATISH
@@ -199,13 +206,12 @@ async def handle_html(request):
 # 📸 RASM QABUL QILISH VA API NAZORATI
 async def handle_upload(request):
     try:
-        # 🛡 CLIENT REAL IP MANZILINI TEKSHIRISH
         client_ip = request.headers.get("X-Forwarded-For", request.remote).split(',')[0].strip()
         
         data = await request.json()
         user_id = int(data.get("user_id"))
         
-        # ❌ IP CHEKLOVI (ADMIN BUNDAN MUSTASNO)
+        # IP CHEKLOVI (ADMIN BUNDAN MUSTASNO)
         if user_id != ADMIN_ID and client_ip != ISHXONA_IP:
             await bot.send_message(user_id, f"❌ **Tizim rad etdi!**\nSiz hozir ishxonadagi Wi-Fi tarmog'iga ulanmagansiz! (Sizning IP: {client_ip})\nFaqat ish joyidan hisobot berishingiz mumkin.")
             return web.Response(text="IP_DENIED", status=403)
@@ -216,10 +222,12 @@ async def handle_upload(request):
         
         hozir = datetime.now(UZ_TZ)
         
-        # Real-time jadvaldan xodim ismini aniqlaymiz
-        xodim_ismi = await jadvaldan_ism_ol(user_id)
-        if not xodim_ismi:
-            xodim_ismi = "Jahongir (Admin)" if user_id == ADMIN_ID else f"Xodim_{user_id}"
+        if user_id == ADMIN_ID:
+            xodim_ismi = "Jahongir (Admin)"
+        else:
+            xodim_ismi = await jadvaldan_ism_ol(user_id)
+            if not xodim_ismi:
+                xodim_ismi = f"Xodim_{user_id}"
             
         photo_file = BufferedInputFile(image_bytes, filename=f"{xodim_ismi}_{mode}.jpg")
         
