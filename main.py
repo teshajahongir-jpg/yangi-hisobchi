@@ -1,161 +1,161 @@
-import os, asyncio, re, requests
+import os
+import pytz
+from datetime import datetime
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, FSInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from docxtpl import DocxTemplate
-from aiohttp import web
-from bs4 import BeautifulSoup
+from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
 
-TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+# 🚨 SOZLAMALAR
+BOT_TOKEN = "8701217643:AAGS5Sa0zybv_lASF4IcNg3_i7nQbxGMoy0"
+ADMIN_ID = 123456789  # Bu yerga o'zingizning Telegram ID raqamingizni yozing (tirnoqsiz, faqat raqam)
 
-# REKVIZITLAR UCHUN HOLATLAR (STATE)
-class ContractForm(StatesGroup):
-    shaxs_turi = State()
-    xizmat_turi = State()
-    rekvizitlar = State()
-    raqam = State()
-    sana = State()
-    tovar_nomi = State()
-    sinf = State()
-    summa = State()
-    summa_soz = State()
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
-def get_org_info(stir):
-    try:
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, 'html.parser')
-            # Korxona nomini qidirish (h5, h6 yoki a teglaridan)
-            name_tag = soup.find(['h5', 'h6', 'a'], class_=lambda x: x != 'navbar-brand')
-            
-            if name_tag:
-                full_text = name_tag.text.strip()
-                # STIRni olib tashlab, faqat toza nomni qoldirish
-                clean_name = re.sub(r'\d{9}', '', full_text).replace('-', '').strip()
-                if len(clean_name) > 3:
-                    return clean_name
-    except: pass
-    return None
-    rekvizitlar = State()
-    raqam = State()
-    sana = State()
-    tovar_nomi = State()
-    sinf = State()
-    summa = State()
-    summa_soz = State()
+# O'zbekiston vaqti
+UZ_TZ = pytz.timezone('Asia/Tashkent')
+
+# Ishchilar bazasi (Xotirada saqlash)
+ishchilar_baza = {}
+
+def xodim_klaviatura():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🟢 Ishni boshlash"), KeyboardButton(text="🔴 Ishni yakunlash")],
+        [KeyboardButton(text="📊 Mening bugungi hisobotim")]
+    ], resize_keyboard=True)
+
+def admin_klaviatura():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🟢 Ishni boshlash"), KeyboardButton(text="🔴 Ishni yakunlash")],
+        [KeyboardButton(text="📊 Mening bugungi hisobotim")],
+        [KeyboardButton(text="👑 Barcha xodimlar hisoboti")] # Faqat sizga ko'rinadi
+    ], resize_keyboard=True)
+
 @dp.message(F.text == "/start")
-async def cmd_start(m: Message, state: FSMContext):
-    await state.clear()
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🏢 Yuridik shaxs"), KeyboardButton(text="👤 Jismoniy shaxs")]
-    ], resize_keyboard=True)
-    await m.answer("Assalomu alaykum! Shartnoma turini tanlang:", reply_markup=kb)
-
-@dp.message(F.text.in_(["🏢 Yuridik shaxs", "👤 Jismoniy shaxs"]))
-async def select_shaxs(m: Message, state: FSMContext):
-    await state.update_data(shaxs_turi=m.text)
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="⚡️ 1 oylik tezkor"), KeyboardButton(text="📅 7 oylik")],
-        [KeyboardButton(text="🔍 Expert tekshiruv")],
-        [KeyboardButton(text="🛠 Expert tekshiruv plus xizmat kursatish")]
-    ], resize_keyboard=True)
-    await m.answer("Xizmat turini tanlang:", reply_markup=kb)
-    await state.set_state(ContractForm.xizmat_turi)
-
-@dp.message(ContractForm.xizmat_turi)
-async def ask_rekvizitlar(m: Message, state: FSMContext):
-    await state.update_data(xizmat_turi=m.text)
-    await m.answer("📄 Rekvizitlar jadvalini tashlang:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(ContractForm.rekvizitlar)
-
-@dp.message(ContractForm.rekvizitlar)
-async def process_rekvizitlar(m: Message, state: FSMContext):
-    t = m.text
-    def find_data(keywords, text):
-        for k in keywords:
-            pattern = fr"{k}[:\s]+((?:[\w\d\s\-\/\.,\'\" ]+))"
-            match = re.search(pattern, text, re.I)
-            if match:
-                return match.group(1).strip().split('\n')[0]
-        return "-"
-
-    lines = t.split('\n')
-    mijoz_nomi = lines[0].replace("Korxona:", "").replace("“", "").replace("”", "").strip()
-
-    await state.update_data(
-        mijoz=mijoz_nomi,
-        stir=find_data(["INN", "STIR", "ИНН", "Pasport", "ПАСПОРТ"], t),
-        xr=find_data(["X/P", "H/R", "XR", "Hisob", "X/p"], t).replace(" ", ""),
-        mfo=find_data(["MFO", "МФО"], t).strip(),
-        manzil=find_data(["Manzil", "Манзил", "Адрес"], t),
-        direktor=find_data(["Direktor", "Директор", "F.I.SH", "Paxbar", "Rahbar"], t)
+async def cmd_start(m: Message):
+    user_id = m.from_user.id
+    matn = (
+        f"Salom, {m.from_user.full_name}!\n"
+        "Ish vaqtini hisoblash botiga xush kelibsiz.\n\n"
+        "⏰ Ish tartibi:\n"
+        "• Smena 1: 09:00 - 13:00\n"
+        "• Obed (Dam olish): 13:00 - 14:00\n"
+        "• Smena 2: 14:00 - 18:00"
     )
-    await m.answer("✅ Rekvizitlar olindi.\n\n7. Shartnoma raqamini kiriting:")
-    await state.set_state(ContractForm.raqam)
-
-@dp.message(ContractForm.raqam)
-async def p_raqam(m: Message, state: FSMContext):
-    await state.update_data(raqam=m.text)
-    await m.answer("8. Sana:")
-    await state.set_state(ContractForm.sana)
-
-@dp.message(ContractForm.sana)
-async def p_sana(m: Message, state: FSMContext):
-    await state.update_data(sana=m.text)
-    await m.answer("9. Brend nomi:")
-    await state.set_state(ContractForm.tovar_nomi)
-
-@dp.message(ContractForm.tovar_nomi)
-async def p_tovar(m: Message, state: FSMContext):
-    await state.update_data(tovar_nomi=m.text)
-    await m.answer("10. Tovar sinfi:")
-    await state.set_state(ContractForm.sinf)
-
-@dp.message(ContractForm.sinf)
-async def p_sinf(m: Message, state: FSMContext):
-    await state.update_data(sinf=m.text)
-    await m.answer("11. Summa (faqat raqamda):")
-    await state.set_state(ContractForm.summa)
-
-@dp.message(ContractForm.summa)
-async def p_summa(m: Message, state: FSMContext):
-    val = m.text.replace(" ", "")
-    formatted = "{:,}".format(int(val)).replace(",", " ") if val.isdigit() else m.text
-    await state.update_data(summa=formatted)
-    await m.answer("12. Summa so'z bilan:")
-    await state.set_state(ContractForm.summa_soz)
-
-@dp.message(ContractForm.summa_soz)
-async def final_render(m: Message, state: FSMContext):
-    await state.update_data(summa_soz=m.text)
-    data = await state.get_data()
     
-    xizmat_nomi = data.get('xizmat_turi', '')
-    shaxs = "yu" if "Yuridik" in data.get('shaxs_turi', '') else "jis"
-    
-    if "plus" in xizmat_nomi.lower():
-        shablon_nomi = "expert_plus.docx"
-    elif "1 oylik" in xizmat_nomi:
-        shablon_nomi = f"{shaxs}_tezkor.docx"
-    elif "7 oylik" in xizmat_nomi:
-        shablon_nomi = f"{shaxs}_7oy.docx"
+    if user_id == ADMIN_ID:
+        await m.answer(matn + "\n\n👑 Siz tizimda **Nazoratchi (Admin)** foydalanuvchisiz.", reply_markup=admin_klaviatura())
     else:
-        shablon_nomi = f"{shaxs}_expert.docx"
+        await m.answer(matn, reply_markup=xodim_klaviatura())
 
-    if not os.path.exists(shablon_nomi):
-        await m.answer(f"❌ Shablon topilmadi: {shablon_nomi}")
+@dp.message(F.text == "🟢 Ishni boshlash")
+async def start_work(m: Message):
+    user_id = m.from_user.id
+    hozir = datetime.now(UZ_TZ)
+    
+    if user_id not in ishchilar_baza:
+        ishchilar_baza[user_id] = {
+            'ism': m.from_user.full_name,
+            'username': f"@{m.from_user.username}" if m.from_user.username else "Yo'q"
+        }
+        
+    ishchilar_baza[user_id]['start'] = hozir
+    # Agar adashib qayta bossa, eski 'end'ni o'chiradi
+    if 'end' in ishchilar_baza[user_id]:
+        del ishchilar_baza[user_id]['end']
+        
+    await m.answer(f"🟢 Ish boshlangan vaqt yozib olindi: **{hozir.strftime('%H:%M:%S')}**\nIshga omad!")
+
+@dp.message(F.text == "🔴 Ishni yakunlash")
+async def end_work(m: Message):
+    user_id = m.from_user.id
+    hozir = datetime.now(UZ_TZ)
+    
+    if user_id not in ishchilar_baza or 'start' not in ishchilar_baza[user_id]:
+        await m.answer("⚠️ Siz hali ishni boshlamagansiz! Avval '🟢 Ishni boshlash' tugmasini bosing.")
         return
+        
+    start_vaqt = ishchilar_baza[user_id]['start']
+    yakun_vaqt = hozir
+    ishchilar_baza[user_id]['end'] = yakun_vaqt
+    
+    # Sof vaqtni hisoblash
+    farq = yakun_vaqt - start_vaqt
+    jami_sekund = farq.total_seconds()
+    
+    obed_ayrildi = False
+    # Agar 13:00 dan oldin kelib, 14:00 dan keyin ketayotgan bo'lsa, 1 soat (3600 sekund) obedni ayiramiz
+    if start_vaqt.hour < 13 and yakun_vaqt.hour >= 14:
+        jami_sekund -= 3600
+        obed_ayrildi = True
 
-    try:
-        doc = DocxTemplate(shablon_nomi)
-        doc.render(data)
-        file_path = f"shartnoma_{m.from_user.id}.docx"
-        doc.save(file_path)
-        await m.answer_document(FSInputFile(file_path), caption="✅ Shartnoma tayyor!")
-        if os.path.exists(file_path): os.remove(file_path)
-    except Exception as e:
-        await m.answer(f"❌ Xatolik yuz berdi: {e}")
-    await state.clear()
+    soat = int(jami_sekund // 3600)
+    minut = int((jami_sekund % 3600) // 60)
+    
+    ishchilar_baza[user_id]['sof_soat'] = f"{soat} soat, {minut} minut"
+    
+    matn = (
+        f"🏁 Ish yakunlandi!\n\n"
+        f"📅 Kelgan vaqt: {start_vaqt.strftime('%H:%M:%S')}\n"
+        f"📅 Ketgan vaqt: {yakun_vaqt.strftime('%H:%M:%S')}\n"
+    )
+    if obed_ayrildi:
+        matn += "🥪 Obed vaqti (1 soat) avtomatik ayirildi.\n"
+        
+    matn += f"⏱ **Sof ish vaqtingiz:** {soat} soat, {minut} minut."
+    await m.answer(matn)
+
+@dp.message(F.text == "📊 Mening bugungi hisobotim")
+async def xodim_report(m: Message):
+    user_id = m.from_user.id
+    if user_id not in ishchilar_baza or 'start' not in ishchilar_baza[user_id]:
+        await m.answer("📊 Siz bugun hali ish boshlamadingiz.")
+        return
+        
+    data = ishchilar_baza[user_id]
+    matn = f"📝 Sizning bugungi hisobotingiz:\n\n🟢 Kelgan vaqt: {data['start'].strftime('%H:%M:%S')}\n"
+    
+    if 'end' in data:
+        matn += f"🔴 Ketgan vaqt: {data['end'].strftime('%H:%M:%S')}\n"
+        matn += f"⏱ Sof ish vaqti: {data.get('sof_soat', '-')}"
+    else:
+        matn += "⏳ Ishingiz hali davom etmoqda..."
+        
+    await m.answer(matn)
+
+# 👑 FAQAT NAZORATCHI (ADMIN) UCHUN BUYRUQ
+@dp.message(F.text == "👑 Barcha xodimlar hisoboti")
+async def admin_report(m: Message):
+    if m.from_user.id != ADMIN_ID:
+        await m.answer("⚠️ Bu tugma faqat nazoratchi (admin) uchun!")
+        return
+        
+    if not ishchilar_baza:
+        await m.answer("📊 Bugun hali hech qaysi xodim tizimga kirmadi.")
+        return
+        
+    hisobot = "📋 **Bugungi umumiy ishchilar nazorati:**\n\n"
+    
+    for uid, data in ishchilar_baza.items():
+        hisobot += f"👤 **Xodim:** {data['ism']} ({data['username']})\n"
+        hisobot += f" ├ 🟢 Keldi: {data['start'].strftime('%H:%M:%S')}\n"
+        
+        if 'end' in data:
+            hisobot += f" ├ 🔴 Ketdi: {data['end'].strftime('%H:%M:%S')}\n"
+            hisobot += f" └ ⏱ Sof ish vaqti: {data['sof_soat']}\n"
+        else:
+            hozir = datetime.now(UZ_TZ)
+            hozirgi_farq = hozir - data['start']
+            h_sekund = hozirgi_farq.total_seconds()
+            if data['start'].hour < 13 and hozir.hour >= 14:
+                h_sekund -= 3600
+            h_soat = int(h_sekund // 3600)
+            h_min = int((h_sekund % 3600) // 60)
+            hisobot += f" └ ⏳ Hozirda ishda (Hozirgacha: {h_soat} soat, {h_min} minut)\n"
+            
+        hisobot += "───────────────────\n"
+        
+    await m.answer(hisobot)
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(dp.start_polling(bot))
