@@ -19,7 +19,7 @@ GOOGLE_JADVAL_ID = "1tCGJQuk9MJ-DZ5JuKMPlxoPPTNdvsVktgU_hYS3A90"
 # 📍 LOKATSIYANI TEKSHIRISH (Uydan sinash uchun 5000 metr)
 ISHXONA_LAT = 39.745430  
 ISHXONA_LON = 64.439307  
-RUXSAT_MASOFA = 5000  
+RUXSAT_MASOFA = 100  
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
