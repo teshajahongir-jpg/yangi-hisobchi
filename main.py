@@ -13,12 +13,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
-# 🚨 ASOSIY SOZLAMALAR
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 GOOGLE_JADVAL_ID = "1tCGJQuk9MJ-DZ5JuKMPlxoPPTNdvsVktgU_hYS3A90" 
 
-# 📍 ISHXONA KOORDINATALARI
 ISHXONA_LAT = 39.745430   
 ISHXONA_LON = 64.439307   
 MAKS_MASOFA = 150         
@@ -46,46 +44,48 @@ def get_google_sheet():
     client = gspread.authorize(creds)
     return client.open_by_key(GOOGLE_JADVAL_ID).sheet1
 
-# 🔍 Telegram ID orqali xodimning ismi va jadvaldagi qator raqamini topish
 def _jadvaldan_xodimni_top(user_id):
     try:
         sheet = get_google_sheet()
-        id_ustuni = sheet.col_values(4) # 4-ustun (Telegram ID)
+        id_ustuni = sheet.col_values(13) # M ustuni (13-ustun)
         for index, tg_id in enumerate(id_ustuni):
             if str(tg_id).strip() == str(user_id):
                 qator_raqami = index + 1
-                ism = sheet.cell(qator_raqami, 1).value # 1-ustundagi ism
+                ism = sheet.cell(qator_raqami, 1).value
                 return {"ism": ism, "qator": qator_raqami}
         return None
     except Exception as e:
-        print(f"Jadval o'qish xatosi: {e}")
+        print(f"Xatolik: {e}")
         return None
 
-# 📝 Ism bo'yicha qidirib, topilgan qatorning 4-ustuniga Telegram ID yozish
 def _jadvalga_id_boglash(xodim_ismi, user_id):
     try:
         sheet = get_google_sheet()
         ismlar_ustuni = sheet.col_values(1)
         for index, name in enumerate(ismlar_ustuni):
             if name and str(name).strip().lower() == str(xodim_ismi).strip().lower():
-                sheet.update_cell(index + 1, 4, str(user_id))
+                sheet.update_cell(index + 1, 13, str(user_id)) # M ustuniga yozadi
                 return True
         return False
     except Exception as e:
-        print(f"ID bog'lash xatosi: {e}")
+        print(f"Xatolik: {e}")
         return False
 
-# ✍️ To'g'ridan-to'g'ri qator raqami bo'yicha katakchani yangilash (Xatosiz va tezkor)
-def _jadvalga_vaqt_yoz(qator, ustun, qiymat):
+def _jadvalga_raqam_qush(qator, ustun, qushiladigan_qiymat):
     try:
         sheet = get_google_sheet()
-        sheet.update_cell(qator, ustun, qiymat)
+        joriy_qiymat = sheet.cell(qator, ustun).value
+        try:
+            eski_son = int(float(str(joriy_qiymat).replace(',', '.'))) if joriy_qiymat else 0
+        except:
+            eski_son = 0
+        yangi_son = eski_son + int(qushiladigan_qiymat)
+        sheet.update_cell(qator, ustun, yangi_son)
         return True
     except Exception as e:
-        print(f"Vaqt yozish xatosi: {e}")
+        print(f"Xatolik: {e}")
         return False
 
-# 📱 KLAVIATURALAR
 def xodim_klaviatura():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🟢 Ishni boshlash", request_location=True)],
@@ -97,26 +97,24 @@ def admin_klaviatura():
         [KeyboardButton(text="📊 Jadvalni tekshirish")]
     ], resize_keyboard=True)
 
-# 👑 /start BUYRUG'I
 @dp.message(F.text == "/start")
 async def cmd_start(m: Message, state: FSMContext):
     user_id = m.from_user.id
     await state.clear()
     
     if user_id == ADMIN_ID:
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim mutlaqo xatosiz formatga o'tkazildi.", reply_markup=admin_klaviatura())
+        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim yangi jadval formatiga moslashtirildi.", reply_markup=admin_klaviatura())
         return
 
     loop = asyncio.get_event_loop()
     xodim = await loop.run_in_executor(None, _jadvaldan_xodimni_top, user_id)
     
     if xodim and xodim["ism"]:
-        await m.answer(f"✨ Xush kelibsiz, {xodim['ism']}!\nKeldi-ketdini qayd etish tugmalari faol:", reply_markup=xodim_klaviatura())
+        await m.answer(f"✨ Xush kelibsiz, {xodim['ism']}!\nLokatsiya orqali keldi-ketdini qayd qilishingiz mumkin:", reply_markup=xodim_klaviatura())
     else:
-        await m.answer("📌 Tizimdan foydalanish uchun Google jadvaldagi (Excel) to'liq ismingizni qanday bo'lsa shunday yozib yuboring:")
+        await m.answer("📌 Tizimdan foydalanish uchun Google jadvaldagi to'liq ismingizni qanday bo'lsa shunday yozib yuboring (Masalan: Sevinch, Charos, Muqaddas opa):")
         await state.set_state(BotStates.ism_kutish)
 
-# 👤 ISMNI QABUL QILISH
 @dp.message(BotStates.ism_kutish)
 async def process_name(m: Message, state: FSMContext):
     xodim_ismi = m.text.strip()
@@ -135,7 +133,6 @@ async def process_name(m: Message, state: FSMContext):
     ]])
     await bot.send_message(ADMIN_ID, f"🔔 **Yangi xodim ro'yxatdan o'tmoqchi:**\n👤 Ismi: {xodim_ismi}\n🆔 Telegram ID: {user_id}", reply_markup=kb)
 
-# 🔘 TASDIQLASH
 @dp.callback_query(F.data.startswith("app_"))
 async def approve_user(call: CallbackQuery):
     parts = call.data.split("_")
@@ -148,7 +145,7 @@ async def approve_user(call: CallbackQuery):
         await call.message.edit_text(f"✅ {xodim_ismi} muvaffaqiyatli tasdiqlandi!")
         await bot.send_message(uid, "🎉 Admin sizni tasdiqladi! Endi /start buyrug'ini bosing.", reply_markup=xodim_klaviatura())
     else:
-        await call.message.edit_text(f"❌ Xatolik: Excel jadvaldan '{xodim_ismi}' ismi topilmadi! Oldin ismni jadvalga aniq kiriting.")
+        await call.message.edit_text(f"❌ Xatolik: Jadvaldan '{xodim_ismi}' ismi topilmadi! Ism 1-ustunda ekanligini tekshiring.")
 
 @dp.callback_query(F.data.startswith("rej_"))
 async def reject_user(call: CallbackQuery):
@@ -156,13 +153,12 @@ async def reject_user(call: CallbackQuery):
     await call.message.edit_text("❌ Rad etildi.")
     await bot.send_message(uid, "❌ So'rovingiz rad etildi.")
 
-# 📍 LOKATSIYA KELGANDA TEKSHIRUV
 @dp.message(F.location)
 async def handle_location(m: Message):
     user_id = m.from_user.id
     
     if user_id == ADMIN_ID:
-        await m.answer("👑 Jahongir aka, siz adminsiz. Sizga keldi-ketdi hisoblash shart emas.")
+        await m.answer("👑 Jahongir aka, siz adminsiz. Keldi-ketdi faqat xodimlar uchun.")
         return
 
     loop = asyncio.get_event_loop()
@@ -186,73 +182,19 @@ async def handle_location(m: Message):
         ishchilar_baza[user_id] = {}
 
     if not ishchilar_baza[user_id].get('came', False):
-        # 🟢 KELDI
         ishchilar_baza[user_id]['start'] = hozir
         ishchilar_baza[user_id]['came'] = True
         
         matn = f"🟢 **{xodim_ismi}** ishni boshladi.\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}\n"
+        # 9:00 dan kechiksa B (2) ustuniga minutni qo'shadi
         if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
             kechikkan = (hozir.hour - 9) * 60 + hozir.minute
-            await loop.run_in_executor(None, _jadvalga_vaqt_yoz, qator, 2, f"+{kechikkan} min")
-            matn += f"⚠️ {kechikkan} minut kechikdi."
+            await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 2, kechikkan)
+            matn += f"⚠️ {kechikkan} minut kechikdi (Jadvalga qo'shildi)."
         else:
-            await loop.run_in_executor(None, _jadvalga_vaqt_yoz, qator, 2, "Vaqtida")
             matn += "✅ Vaqtida keldi."
                 
         await bot.send_message(ADMIN_ID, f"🔔 **Keldi hisoboti:**\n{matn}")
         await m.answer(f"✅ Ish boshlangan vaqtingiz qayd etildi: {hozir.strftime('%H:%M')}")
     else:
-        # 🔴 KETDI
-        start_vaqt = ishchilar_baza[user_id].get('start', hozir)
-        ishchilar_baza[user_id]['came'] = False
-        
-        farq = (hozir - start_vaqt).total_seconds()
-        if start_vaqt.hour < 13 and hozir.hour >= 14:
-            farq -= 3600
-        soat, minut = int(farq // 3600), int((farq % 3600) // 60)
-        
-        await loop.run_in_executor(None, _jadvalga_vaqt_yoz, qator, 3, f"{soat} soat {minut} m")
-            
-        await bot.send_message(ADMIN_ID, f"🔔 **Ketdi hisoboti:**\n👤 {xodim_ismi}\n📅 Ish vaqti: {soat} soat {minut} min")
-        await m.answer(f"🔴 Ish yakunlangan vaqtingiz qayd etildi: {hozir.strftime('%H:%M')}\nCharchamang!")
-
-# 📊 ADMIN JADVALNI TEKSHIRISHI
-@dp.message(F.text == "📊 Jadvalni tekshirish")
-async def check_sheet_admin(m: Message):
-    if m.from_user.id != ADMIN_ID: return
-    try:
-        loop = asyncio.get_event_loop()
-        sheet = await loop.run_in_executor(None, get_google_sheet)
-        ismlar = await loop.run_in_executor(None, sheet.col_values, 1)
-        await m.answer(f"✅ Google Sheets ulanishi zo'r!\nJadvaldagi birinchi 3 ta ism: {', '.join(ismlar[:3])}")
-    except Exception as e:
-        await m.answer(f"❌ Jadvalga ulanishda xatolik: {e}")
-
-# ℹ️ ORTIQCHA MATNLAR
-@dp.message()
-async def ignore_all_text(m: Message):
-    if m.from_user.id == ADMIN_ID:
-        await m.answer("👑 Jahongir aka, pastdagi 'Jadvalni tekshirish' tugmasidan foydalanishingiz mumkin.")
-    else:
-        await m.answer("ℹ️ Keldi-ketdini qayd etish uchun faqat pastdagi maxsus yashil/qizil tugmalarni bosing.")
-
-async def handle_ping(request):
-    return web.Response(text="Bot is running", status=200)
-
-async def main():
-    loop = asyncio.get_event_loop()
-    loop.create_task(dp.start_polling(bot))
-
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    
-    port = int(os.environ.get("PORT", 8080))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+        start_vaqt = ishch
