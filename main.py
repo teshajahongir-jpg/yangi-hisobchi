@@ -3,6 +3,7 @@ import pytz
 import gspread
 import asyncio
 import base64
+import json
 from math import radians, cos, sin, asin, sqrt
 from google.oauth2.service_account import Credentials
 from datetime import datetime
@@ -13,10 +14,27 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
+# 🚨 ASOSIY SOZLAMALAR
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 GOOGLE_JADVAL_ID = "1tCGJQuk9MJ-DZ5JuKMPlxoPPTNdvsVktgU_hYS3A90" 
 
+# 🔑 GOOGLE CREDENTIALS JSON MATNINI SHUYERGA QO'YING
+# Esma-es: credentials.json faylingiz ichidagi hamma narsani ko'chirib mana shu {} ichiga tashlang
+GOOGLE_CREDENTIALS = {
+  "type": "service_account",
+  "project_id": "YOUR_PROJECT_ID",
+  "private_key_id": "YOUR_PRIVATE_KEY_ID",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nYOUR_KEY_HERE\n-----END PRIVATE KEY-----\n",
+  "client_email": "YOUR_CLIENT_EMAIL",
+  "client_id": "YOUR_CLIENT_ID",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "YOUR_CERT_URL"
+}
+
+# 📍 ISHXONA KOORDINATALARI
 ISHXONA_LAT = 39.745430   
 ISHXONA_LON = 64.439307   
 MAKS_MASOFA = 150         
@@ -40,7 +58,8 @@ def masofani_hisobla(lat1, lon1, lat2, lon2):
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
+    # Fayldan emas, to'g'ridan-to'g'ri o'zimiz yozgan o'zgaruvchidan o'qiydi
+    creds = Credentials.from_service_account_info(GOOGLE_CREDENTIALS, scopes=scope)
     client = gspread.authorize(creds)
     return client.open_by_key(GOOGLE_JADVAL_ID).sheet1
 
@@ -64,7 +83,7 @@ def _jadvalga_id_boglash(xodim_ismi, user_id):
         ismlar_ustuni = sheet.col_values(1)
         for index, name in enumerate(ismlar_ustuni):
             if name and str(name).strip().lower() == str(xodim_ismi).strip().lower():
-                sheet.update_cell(index + 1, 13, str(user_id)) # M ustuniga yozadi
+                sheet.update_cell(index + 1, 13, str(user_id))
                 return True
         return False
     except Exception as e:
@@ -103,7 +122,7 @@ async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     
     if user_id == ADMIN_ID:
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim yangi jadval formatiga moslashtirildi.", reply_markup=admin_klaviatura())
+        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim credentials muammosiz formatga o'tkazildi.", reply_markup=admin_klaviatura())
         return
 
     loop = asyncio.get_event_loop()
@@ -165,7 +184,7 @@ async def handle_location(m: Message):
     xodim = await loop.run_in_executor(None, _jadvaldan_xodimni_top, user_id)
     
     if not xodim or not xodim["ism"]:
-        await m.answer("📌 Iltimos, oldin /start bosing va ro'yxatdan o'ting.")
+        await m.answer("📌 Iltimos, oldin /start bosing va ro'yxatdan o'tish so'rovini yuboring.")
         return
         
     xodim_ismi = xodim["ism"]
@@ -186,7 +205,6 @@ async def handle_location(m: Message):
         ishchilar_baza[user_id]['came'] = True
         
         matn = f"🟢 **{xodim_ismi}** ishni boshladi.\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}\n"
-        # 9:00 dan kechiksa B (2) ustuniga minutni qo'shadi
         if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
             kechikkan = (hozir.hour - 9) * 60 + hozir.minute
             await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 2, kechikkan)
@@ -197,4 +215,55 @@ async def handle_location(m: Message):
         await bot.send_message(ADMIN_ID, f"🔔 **Keldi hisoboti:**\n{matn}")
         await m.answer(f"✅ Ish boshlangan vaqtingiz qayd etildi: {hozir.strftime('%H:%M')}")
     else:
-        start_vaqt = ishch
+        start_vaqt = ishchilar_baza[user_id].get('start', hozir)
+        ishchilar_baza[user_id]['came'] = False
+        
+        farq = (hozir - start_vaqt).total_seconds()
+        if start_vaqt.hour < 13 and hozir.hour >= 14:
+            farq -= 3600
+        soat = int(farq // 3600)
+        if soat < 1: 
+            soat = 1 
+            
+        await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 3, soat)
+        await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 4, 1)
+            
+        await bot.send_message(ADMIN_ID, f"🔔 **Ketdi hisoboti:**\n👤 {xodim_ismi}\n📅 Bugun ishladi: {soat} soat\n📊 Jadvalda Soat va Kun yangilandi.")
+        await m.answer(f"🔴 Ish yakunlangan vaqtingiz qayd etildi: {hozir.strftime('%H:%M')}\nJadvalga {soat} soat va +1 kun qo'shildi. Charchamang!")
+
+@dp.message(F.text == "📊 Jadvalni tekshirish")
+async def check_sheet_admin(m: Message):
+    if m.from_user.id != ADMIN_ID: return
+    try:
+        loop = asyncio.get_event_loop()
+        sheet = await loop.run_in_executor(None, get_google_sheet)
+        ismlar = await loop.run_in_executor(None, sheet.col_values, 1)
+        await m.answer(f"✅ Google Sheets ulanishi tiklandi!\nJadvaldagi xodimlar soni: {len(ismlar)-1} ta.\nBirinchi 3 tasi: {', '.join(ismlar[1:4])}")
+    except Exception as e:
+        await m.answer(f"❌ Xatolik: {e}")
+
+@dp.message()
+async def ignore_all_text(m: Message):
+    if m.from_user.id == ADMIN_ID:
+        await m.answer("👑 Jahongir aka, pastdagi 'Jadvalni tekshirish' tugmasidan foydalanishingiz mumkin.")
+    else:
+        await m.answer("ℹ️ Keldi-ketdini qayd etish uchun faqat pastdagi maxsus yashil/qizil tugmalarni bosing (Lokatsiya yuboring).")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is running", status=200)
+
+async def main():
+    loop = asyncio.get_event_loop()
+    loop.create_task(dp.start_polling(bot))
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    port = int(os.environ.get("PORT", 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
