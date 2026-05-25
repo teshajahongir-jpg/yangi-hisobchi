@@ -3,7 +3,6 @@ import pytz
 import gspread
 import asyncio
 import base64
-import json
 from math import radians, cos, sin, asin, sqrt
 from google.oauth2.service_account import Credentials
 from datetime import datetime
@@ -14,27 +13,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 
-# 🚨 ASOSIY SOZLAMALAR
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 GOOGLE_JADVAL_ID = "1tCGJQuk9MJ-DZ5JuKMPlxoPPTNdvsVktgU_hYS3A90" 
 
-# 🔑 GOOGLE CREDENTIALS JSON MATNINI SHUYERGA QO'YING
-# Esma-es: credentials.json faylingiz ichidagi hamma narsani ko'chirib mana shu {} ichiga tashlang
-GOOGLE_CREDENTIALS = {
-  "type": "service_account",
-  "project_id": "YOUR_PROJECT_ID",
-  "private_key_id": "YOUR_PRIVATE_KEY_ID",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nYOUR_KEY_HERE\n-----END PRIVATE KEY-----\n",
-  "client_email": "YOUR_CLIENT_EMAIL",
-  "client_id": "YOUR_CLIENT_ID",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "YOUR_CERT_URL"
-}
-
-# 📍 ISHXONA KOORDINATALARI
 ISHXONA_LAT = 39.745430   
 ISHXONA_LON = 64.439307   
 MAKS_MASOFA = 150         
@@ -58,15 +40,15 @@ def masofani_hisobla(lat1, lon1, lat2, lon2):
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    # Fayldan emas, to'g'ridan-to'g'ri o'zimiz yozgan o'zgaruvchidan o'qiydi
-    creds = Credentials.from_service_account_info(GOOGLE_CREDENTIALS, scopes=scope)
+    # Faylni to'g'ridan-to'g'ri loyihaning asosiy papkasidan qidiradi
+    creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     client = gspread.authorize(creds)
     return client.open_by_key(GOOGLE_JADVAL_ID).sheet1
 
 def _jadvaldan_xodimni_top(user_id):
     try:
         sheet = get_google_sheet()
-        id_ustuni = sheet.col_values(13) # M ustuni (13-ustun)
+        id_ustuni = sheet.col_values(13)
         for index, tg_id in enumerate(id_ustuni):
             if str(tg_id).strip() == str(user_id):
                 qator_raqami = index + 1
@@ -122,7 +104,7 @@ async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     
     if user_id == ADMIN_ID:
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim credentials muammosiz formatga o'tkazildi.", reply_markup=admin_klaviatura())
+        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim yangi jadval formatiga moslashtirildi.", reply_markup=admin_klaviatura())
         return
 
     loop = asyncio.get_event_loop()
@@ -238,16 +220,9 @@ async def check_sheet_admin(m: Message):
         loop = asyncio.get_event_loop()
         sheet = await loop.run_in_executor(None, get_google_sheet)
         ismlar = await loop.run_in_executor(None, sheet.col_values, 1)
-        await m.answer(f"✅ Google Sheets ulanishi tiklandi!\nJadvaldagi xodimlar soni: {len(ismlar)-1} ta.\nBirinchi 3 tasi: {', '.join(ismlar[1:4])}")
+        await m.answer(f"✅ Google Sheets ulanishi zo'r!\nJadvaldagi xodimlar soni: {len(ismlar)-1} ta.\nBirinchi 3 tasi: {', '.join(ismlar[1:4])}")
     except Exception as e:
         await m.answer(f"❌ Xatolik: {e}")
-
-@dp.message()
-async def ignore_all_text(m: Message):
-    if m.from_user.id == ADMIN_ID:
-        await m.answer("👑 Jahongir aka, pastdagi 'Jadvalni tekshirish' tugmasidan foydalanishingiz mumkin.")
-    else:
-        await m.answer("ℹ️ Keldi-ketdini qayd etish uchun faqat pastdagi maxsus yashil/qizil tugmalarni bosing (Lokatsiya yuboring).")
 
 async def handle_ping(request):
     return web.Response(text="Bot is running", status=200)
