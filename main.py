@@ -40,15 +40,25 @@ def masofani_hisobla(lat1, lon1, lat2, lon2):
 
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    # Faylni to'g'ridan-to'g'ri loyihaning asosiy papkasidan qidiradi
-    creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
+    
+    # 📝 PEM KALITIDAGI BUZILGAN RAMZLARNI AVTOMATIK TOZALASH MANTIQI
+    import json
+    with open('credentials.json', 'r') as f:
+        creds_data = json.load(f)
+    
+    # Agar private_key ichida qanaqadir adashgan simvollar (masalan g'alati chiziqlar) bo'lsa, tozalaydi
+    if "private_key" in creds_data:
+        cleaned_key = creds_data["private_key"].replace('\\n', '\n').strip()
+        creds_data["private_key"] = cleaned_key
+
+    creds = Credentials.from_service_account_info(creds_data, scopes=scope)
     client = gspread.authorize(creds)
     return client.open_by_key(GOOGLE_JADVAL_ID).sheet1
 
 def _jadvaldan_xodimni_top(user_id):
     try:
         sheet = get_google_sheet()
-        id_ustuni = sheet.col_values(13)
+        id_ustuni = sheet.col_values(13) # M ustuni
         for index, tg_id in enumerate(id_ustuni):
             if str(tg_id).strip() == str(user_id):
                 qator_raqami = index + 1
@@ -220,7 +230,7 @@ async def check_sheet_admin(m: Message):
         loop = asyncio.get_event_loop()
         sheet = await loop.run_in_executor(None, get_google_sheet)
         ismlar = await loop.run_in_executor(None, sheet.col_values, 1)
-        await m.answer(f"✅ Google Sheets ulanishi zo'r!\nJadvaldagi xodimlar soni: {len(ismlar)-1} ta.\nBirinchi 3 tasi: {', '.join(ismlar[1:4])}")
+        await m.answer(f"✅ Google Sheets ulanishi mukammal darajada tiklandi!\nJadvaldagi xodimlar soni: {len(ismlar)-1} ta.\nBirinchi 3 tasi: {', '.join(ismlar[1:4])}")
     except Exception as e:
         await m.answer(f"❌ Xatolik: {e}")
 
