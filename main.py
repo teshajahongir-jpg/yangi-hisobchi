@@ -1,31 +1,45 @@
 import os
 import pytz
-import gspread
 import asyncio
-import base64
 from math import radians, cos, sin, asin, sqrt
-from google.oauth2.service_account import Credentials
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+# 🚨 ASOSIY TIZIM SOZLAMALARI
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
-GOOGLE_JADVAL_ID = "1tCGJQuk9MJ-DZ5JuKMPlxoPPTNdvsVktgU_hYS3A90" 
 
+# 📍 ISHXONA KOORDINATASI VA CHEGARA MASOFASI
 ISHXONA_LAT = 39.745430   
 ISHXONA_LON = 64.439307   
 MAKS_MASOFA = 150         
 
+# 💰 SIZ BERGAN YANGI OYLIKLAR VA JADVALDAGI STAVKALAR (image_ff6d40.png)
+XODIMLAR_BAZASI = {
+    "Sevinch":      {"oylik": 4000000, "minut_narxi": 14743.59, "soat_narxi": 0.0,       "kun_narxi": 0.0},
+    "Charos":       {"oylik": 6000000, "minut_narxi": 3846.15,  "soat_narxi": 201923.08, "kun_narxi": 0.0},
+    "Ozodbek":      {"oylik": 6000000, "minut_narxi": 49038.46, "soat_narxi": 28846.15,  "kun_narxi": 0.0},
+    "Xudoyorxon":   {"oylik": 5200000, "minut_narxi": 75000.0,  "soat_narxi": 0.0,       "kun_narxi": 0.0},
+    "Ruxshona":     {"oylik": 5200000, "minut_narxi": 3333.33,  "soat_narxi": 50000.0,   "kun_narxi": 200000.0},
+    "Ferangiz":     {"oylik": 3000000, "minut_narxi": 1923.08,  "soat_narxi": 0.0,       "kun_narxi": 0.0},
+    "Jahongir":     {"oylik": 1200000, "minut_narxi": 0.0,      "soat_narxi": 0.0,       "kun_narxi": 0.0},
+    "Muqaddas opa": {"oylik": 2200000, "minut_narxi": 0.0,      "soat_narxi": 0.0,       "kun_narxi": 0.0},
+    "Avazbek":      {"oylik": 2000000, "minut_narxi": 801.28,   "soat_narxi": 0.0,       "kun_narxi": 0.0}
+}
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 UZ_TZ = pytz.timezone('Asia/Tashkent')
+scheduler = AsyncIOScheduler(timezone=UZ_TZ)
 
-ishchilar_baza = {} 
+# Ma'lumotlarni xotirada saqlash bazasi
+tizim_baza = {}
 
 class BotStates(StatesGroup):
     ism_kutish = State()
@@ -38,64 +52,19 @@ def masofani_hisobla(lat1, lon1, lat2, lon2):
     c = 2 * asin(sqrt(a)) 
     return c * 6371000
 
-def get_google_sheet():
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    
-    # 📝 PEM KALITIDAGI BUZILGAN RAMZLARNI AVTOMATIK TOZALASH MANTIQI
-    import json
-    with open('credentials.json', 'r') as f:
-        creds_data = json.load(f)
-    
-    # Agar private_key ichida qanaqadir adashgan simvollar (masalan g'alati chiziqlar) bo'lsa, tozalaydi
-    if "private_key" in creds_data:
-        cleaned_key = creds_data["private_key"].replace('\\n', '\n').strip()
-        creds_data["private_key"] = cleaned_key
-
-    creds = Credentials.from_service_account_info(creds_data, scopes=scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(GOOGLE_JADVAL_ID).sheet1
-
-def _jadvaldan_xodimni_top(user_id):
-    try:
-        sheet = get_google_sheet()
-        id_ustuni = sheet.col_values(13) # M ustuni
-        for index, tg_id in enumerate(id_ustuni):
-            if str(tg_id).strip() == str(user_id):
-                qator_raqami = index + 1
-                ism = sheet.cell(qator_raqami, 1).value
-                return {"ism": ism, "qator": qator_raqami}
-        return None
-    except Exception as e:
-        print(f"Xatolik: {e}")
-        return None
-
-def _jadvalga_id_boglash(xodim_ismi, user_id):
-    try:
-        sheet = get_google_sheet()
-        ismlar_ustuni = sheet.col_values(1)
-        for index, name in enumerate(ismlar_ustuni):
-            if name and str(name).strip().lower() == str(xodim_ismi).strip().lower():
-                sheet.update_cell(index + 1, 13, str(user_id))
-                return True
-        return False
-    except Exception as e:
-        print(f"Xatolik: {e}")
-        return False
-
-def _jadvalga_raqam_qush(qator, ustun, qushiladigan_qiymat):
-    try:
-        sheet = get_google_sheet()
-        joriy_qiymat = sheet.cell(qator, ustun).value
-        try:
-            eski_son = int(float(str(joriy_qiymat).replace(',', '.'))) if joriy_qiymat else 0
-        except:
-            eski_son = 0
-        yangi_son = eski_son + int(qushiladigan_qiymat)
-        sheet.update_cell(qator, ustun, yangi_son)
-        return True
-    except Exception as e:
-        print(f"Xatolik: {e}")
-        return False
+# ⏰ HAR KUNI SOAT 17:00 DA AVTOMATIK SIGNAL (image_fffefd.png)
+async def kunlik_eslatma():
+    for tg_id, info in tizim_baza.items():
+        if info.get('tasdiqlangan', False) and tg_id != ADMIN_ID:
+            try:
+                await bot.send_message(
+                    chat_id=tg_id,
+                    text="⏰ **Ish vaqti tugadi!**\n\nIltimos, pastdagi **🔴 Ishni yakunlash** tugmasini bosib, lokatsiyangizni yuboring.",
+                    reply_markup=xodim_klaviatura()
+                )
+            except:
+                pass
+    await bot.send_message(ADMIN_ID, "📢 Xodimlarga soat 17:00 eslatmasi avtomat yuborildi.")
 
 def xodim_klaviatura():
     return ReplyKeyboardMarkup(keyboard=[
@@ -105,7 +74,7 @@ def xodim_klaviatura():
 
 def admin_klaviatura():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📊 Jadvalni tekshirish")]
+        [KeyboardButton(text="📊 Xodimlar hisoboti (Buxgalteriya)")]
     ], resize_keyboard=True)
 
 @dp.message(F.text == "/start")
@@ -114,130 +83,149 @@ async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     
     if user_id == ADMIN_ID:
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim yangi jadval formatiga moslashtirildi.", reply_markup=admin_klaviatura())
+        await m.answer("👑 Xush kelibsiz Jahongir aka! Bot yangilangan oyliklar bilan sozlangan holatda ishga tushdi.", reply_markup=admin_klaviatura())
         return
 
-    loop = asyncio.get_event_loop()
-    xodim = await loop.run_in_executor(None, _jadvaldan_xodimni_top, user_id)
-    
-    if xodim and xodim["ism"]:
-        await m.answer(f"✨ Xush kelibsiz, {xodim['ism']}!\nLokatsiya orqali keldi-ketdini qayd qilishingiz mumkin:", reply_markup=xodim_klaviatura())
+    if user_id in tizim_baza and tizim_baza[user_id].get('tasdiqlangan', False):
+        ism = tizim_baza[user_id]['ism']
+        await m.answer(f"✨ Xush kelibsiz, {ism}!\nKelim-ketimni qayd etish uchun quyidagi tugmalardan foydalaning:", reply_markup=xodim_klaviatura())
     else:
-        await m.answer("📌 Tizimdan foydalanish uchun Google jadvaldagi to'liq ismingizni qanday bo'lsa shunday yozib yuboring (Masalan: Sevinch, Charos, Muqaddas opa):")
+        await m.answer("📌 Botdan foydalanish uchun ro'yxatdagi to'liq ismingizni kiriting (Masalan: Sevinch, Charos, Ozodbek):")
         await state.set_state(BotStates.ism_kutish)
 
 @dp.message(BotStates.ism_kutish)
 async def process_name(m: Message, state: FSMContext):
     xodim_ismi = m.text.strip()
     user_id = m.from_user.id
+    if xodim_ismi.startswith("/"): return
     
-    if xodim_ismi.startswith("/"):
-        await m.answer("📌 Iltimos, ismingizni to'g'ri kiriting:")
+    topilgan_ism = None
+    for k in XODIMLAR_BAZASI.keys():
+        if k.lower() == xodim_ismi.lower():
+            topilgan_ism = k
+            break
+            
+    if not topilgan_ism:
+        ismlar_listi = ", ".join(XODIMLAR_BAZASI.keys())
+        await m.answer(f"❌ Bunday ismli xodim ro'yxatda yo'q!\nIltimos, ismingizni quyidagilardan biri shaklida aniq yozing:\n`{ismlar_listi}`")
         return
         
     await state.clear()
-    await m.answer("✅ Ro'yxatdan o'tish so'rovi adminga yuborildi. Tasdiqlashlarini kuting.")
     
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"app_{user_id}_{base64.b64encode(xodim_ismi.encode()).decode()}"),
-        InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rej_{user_id}")
-    ]])
-    await bot.send_message(ADMIN_ID, f"🔔 **Yangi xodim ro'yxatdan o'tmoqchi:**\n👤 Ismi: {xodim_ismi}\n🆔 Telegram ID: {user_id}", reply_markup=kb)
-
-@dp.callback_query(F.data.startswith("app_"))
-async def approve_user(call: CallbackQuery):
-    parts = call.data.split("_")
-    uid, xodim_ismi = int(parts[1]), base64.b64decode(parts[2].encode()).decode()
+    tizim_baza[user_id] = {
+        "ism": topilgan_ism,
+        "tasdiqlangan": True,
+        "came": False,
+        "start_time": None,
+        "jami_minut": 0,
+        "jami_soat": 0,
+        "jami_kun": 0
+    }
     
-    loop = asyncio.get_event_loop()
-    muvaffaqiyat = await loop.run_in_executor(None, _jadvalga_id_boglash, xodim_ismi, uid)
-    
-    if muvaffaqiyat:
-        await call.message.edit_text(f"✅ {xodim_ismi} muvaffaqiyatli tasdiqlandi!")
-        await bot.send_message(uid, "🎉 Admin sizni tasdiqladi! Endi /start buyrug'ini bosing.", reply_markup=xodim_klaviatura())
-    else:
-        await call.message.edit_text(f"❌ Xatolik: Jadvaldan '{xodim_ismi}' ismi topilmadi! Ism 1-ustunda ekanligini tekshiring.")
-
-@dp.callback_query(F.data.startswith("rej_"))
-async def reject_user(call: CallbackQuery):
-    uid = int(call.data.split("_")[1])
-    await call.message.edit_text("❌ Rad etildi.")
-    await bot.send_message(uid, "❌ So'rovingiz rad etildi.")
+    await m.answer(f"✅ Rahmat, {topilgan_ism}! Tizimga muvaffaqiyatli ulandingiz.", reply_markup=xodim_klaviatura())
+    await bot.send_message(ADMIN_ID, f"🔔 **Yangi xodim botga kirdi:** {topilgan_ism} (ID: {user_id})")
 
 @dp.message(F.location)
 async def handle_location(m: Message):
     user_id = m.from_user.id
-    
-    if user_id == ADMIN_ID:
-        await m.answer("👑 Jahongir aka, siz adminsiz. Keldi-ketdi faqat xodimlar uchun.")
-        return
+    if user_id == ADMIN_ID: return
 
-    loop = asyncio.get_event_loop()
-    xodim = await loop.run_in_executor(None, _jadvaldan_xodimni_top, user_id)
-    
-    if not xodim or not xodim["ism"]:
-        await m.answer("📌 Iltimos, oldin /start bosing va ro'yxatdan o'tish so'rovini yuboring.")
+    if user_id not in tizim_baza:
+        await m.answer("📌 Iltimos, oldin /start buyrug'ini bosing.")
         return
         
+    xodim = tizim_baza[user_id]
     xodim_ismi = xodim["ism"]
-    qator = xodim["qator"]
     
     masofa = masofani_hisobla(m.location.latitude, m.location.longitude, ISHXONA_LAT, ISHXONA_LON)
-    
     if masofa > MAKS_MASOFA:
-        await m.answer(f"❌ **Tizim rad etdi!**\nSiz ishxonada emassiz. Masofa: {int(masofa)} metr.")
+        await m.answer(f"❌ **Masofa xatoligi!** Siz ishxonada emassiz. Masofa: {int(masofa)} metr.")
         return
 
     hozir = datetime.now(UZ_TZ)
-    if user_id not in ishchilar_baza:
-        ishchilar_baza[user_id] = {}
 
-    if not ishchilar_baza[user_id].get('came', False):
-        ishchilar_baza[user_id]['start'] = hozir
-        ishchilar_baza[user_id]['came'] = True
-        
+    if not xodim['came']:
+        # 🟢 ISHNI BOSHLASH
+        xodim['start_time'] = hozir
+        xodim['came'] = True
         matn = f"🟢 **{xodim_ismi}** ishni boshladi.\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}\n"
+        
+        # Kechikish minutini hisoblash (09:00 dan keyin kelsa)
         if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
-            kechikkan = (hozir.hour - 9) * 60 + hozir.minute
-            await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 2, kechikkan)
-            matn += f"⚠️ {kechikkan} minut kechikdi (Jadvalga qo'shildi)."
+            kechikish = (hozir.hour - 9) * 60 + hozir.minute
+            xodim['jami_minut'] += kechikish
+            matn += f"⚠️ {kechikish} minut kechikdi (Oylikdan chegiriladi)."
         else:
             matn += "✅ Vaqtida keldi."
-                
+            
         await bot.send_message(ADMIN_ID, f"🔔 **Keldi hisoboti:**\n{matn}")
-        await m.answer(f"✅ Ish boshlangan vaqtingiz qayd etildi: {hozir.strftime('%H:%M')}")
+        await m.answer(f"✅ Ish boshlash vaqtingiz yozildi: {hozir.strftime('%H:%M')}")
     else:
-        start_vaqt = ishchilar_baza[user_id].get('start', hozir)
-        ishchilar_baza[user_id]['came'] = False
+        # 🔴 ISHNI YAKUNLASH
+        start_vaqt = xodim['start_time']
+        xodim['came'] = False
         
-        farq = (hozir - start_vaqt).total_seconds()
+        farq_soniya = (hozir - start_vaqt).total_seconds()
+        # Obed vaqtini chegirish
         if start_vaqt.hour < 13 and hozir.hour >= 14:
-            farq -= 3600
-        soat = int(farq // 3600)
-        if soat < 1: 
-            soat = 1 
+            farq_soniya -= 3600
             
-        await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 3, soat)
-        await loop.run_in_executor(None, _jadvalga_raqam_qush, qator, 4, 1)
-            
-        await bot.send_message(ADMIN_ID, f"🔔 **Ketdi hisoboti:**\n👤 {xodim_ismi}\n📅 Bugun ishladi: {soat} soat\n📊 Jadvalda Soat va Kun yangilandi.")
-        await m.answer(f"🔴 Ish yakunlangan vaqtingiz qayd etildi: {hozir.strftime('%H:%M')}\nJadvalga {soat} soat va +1 kun qo'shildi. Charchamang!")
+        ishlangan_soat = int(farq_soniya // 3600)
+        if ishlangan_soat < 1: ishlangan_soat = 1
+        
+        xodim['jami_soat'] += ishlangan_soat
+        xodim['jami_kun'] += 1
+        
+        await bot.send_message(ADMIN_ID, f"🔔 **Ketdi hisoboti:**\n👤 {xodim_ismi}\n📅 Bugun ishladi: {ishlangan_soat} soat")
+        await m.answer(f"🔴 Ish yakunlandi vaqtingiz yozildi: {hozir.strftime('%H:%M')}\nSoat va kun hisobga qo'shildi.")
 
-@dp.message(F.text == "📊 Jadvalni tekshirish")
-async def check_sheet_admin(m: Message):
+@dp.message(F.text == "📊 Xodimlar hisoboti (Buxgalteriya)")
+async def admin_report(m: Message):
     if m.from_user.id != ADMIN_ID: return
-    try:
-        loop = asyncio.get_event_loop()
-        sheet = await loop.run_in_executor(None, get_google_sheet)
-        ismlar = await loop.run_in_executor(None, sheet.col_values, 1)
-        await m.answer(f"✅ Google Sheets ulanishi mukammal darajada tiklandi!\nJadvaldagi xodimlar soni: {len(ismlar)-1} ta.\nBirinchi 3 tasi: {', '.join(ismlar[1:4])}")
-    except Exception as e:
-        await m.answer(f"❌ Xatolik: {e}")
+    
+    if not tizim_baza:
+        await m.answer("📊 Hozircha xodimlar ma'lumotlar bazasi bo'sh.")
+        return
+        
+    matn = "📊 **BUXGALTERIYA VA OYLIK HISOBOTI**\n\n"
+    
+    for uid, data in tizim_baza.items():
+        ism = data['ism']
+        stavka = XODIMLAR_BAZASI[ism]
+        
+        minut = data['jami_minut']
+        soat = data['jami_soat']
+        kun = data['jami_kun']
+        oylik = stavka['oylik']
+        
+        # 🧮 EXCEL FORMULANGIZ (image_ff6d40.png bo'yicha)
+        vazvirat = minut * stavka['minut_narxi']
+        qo_shimcha_soat = soat * stavka['soat_narxi']
+        qo_shimcha_kun = kun * stavka['kun_narxi']
+        
+        # Yakuniy hisob: oylikdan minutlar narxi ayriladi, soat va kun pullari qo'shiladi
+        bugalter_summa = oylik - vazvirat + qo_shimcha_soat + qo_shimcha_kun
+        if bugalter_summa < 0: bugalter_summa = 0
+        
+        matn += f"👤 **Xodim:** {ism}\n"
+        matn += f"⏱ Kechikkan vaqti: {minut} minut\n"
+        matn += f"👔 Qo'shimcha soati: {soat} soat\n"
+        matn += f"📅 Qo'shimcha kuni: {kun} kun\n"
+        matn += f"📉 Qilingan vazvirat (Jarimalar): {vazvirat:,.2f} so'm\n"
+        matn += f"💵 Asosiy oylik maoshi: {oylik:,.2f} so'm\n"
+        matn += f"💰 🟢 **Bug'alter beradigan summa:** {bugalter_summa:,.2f} so'm\n"
+        matn += "--------------------------------------\n"
+        
+    await m.answer(matn)
 
 async def handle_ping(request):
-    return web.Response(text="Bot is running", status=200)
+    return web.Response(text="Bot Active", status=200)
 
 async def main():
+    # Taymer: Har kuni soat 17:00 da avtomat ishlaydi
+    scheduler.add_job(kunlik_eslatma, 'cron', hour=17, minute=0)
+    scheduler.start()
+
     loop = asyncio.get_event_loop()
     loop.create_task(dp.start_polling(bot))
     app = web.Application()
