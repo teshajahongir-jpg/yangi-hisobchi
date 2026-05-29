@@ -20,7 +20,7 @@ ISHXONA_LAT = 39.745430
 ISHXONA_LON = 64.439307   
 MAKS_MASOFA = 150         
 
-# 💰 SIZ BERGAN YANGI OYLIKLAR VA JADVALDAGI STAVKALAR (image_ff6d40.png)
+# 💰 JADVALDAGI STAVKALAR (image_ff6d40.png bo'yicha)
 XODIMLAR_BAZASI = {
     "Sevinch":      {"oylik": 4000000, "minut_narxi": 14743.59, "soat_narxi": 0.0,       "kun_narxi": 0.0},
     "Charos":       {"oylik": 6000000, "minut_narxi": 3846.15,  "soat_narxi": 201923.08, "kun_narxi": 0.0},
@@ -38,7 +38,7 @@ dp = Dispatcher(storage=MemoryStorage())
 UZ_TZ = pytz.timezone('Asia/Tashkent')
 scheduler = AsyncIOScheduler(timezone=UZ_TZ)
 
-# Ma'lumotlarni xotirada saqlash bazasi
+# Ichki ma'lumotlar bazasi
 tizim_baza = {}
 
 class BotStates(StatesGroup):
@@ -52,191 +52,16 @@ def masofani_hisobla(lat1, lon1, lat2, lon2):
     c = 2 * asin(sqrt(a)) 
     return c * 6371000
 
-# ⏰ HAR KUNI SOAT 17:00 DA AVTOMATIK SIGNAL (image_fffefd.png)
+# ⏰ HAR KUNI SOAT 17:00 DA AVTOMATIK SIGNAL
 async def kunlik_eslatma():
     for tg_id, info in tizim_baza.items():
         if info.get('tasdiqlangan', False) and tg_id != ADMIN_ID:
             try:
                 await bot.send_message(
                     chat_id=tg_id,
-                    text="⏰ **Ish vaqti tugadi!**\n\nIltimos, pastdagi **🔴 Ishni yakunlash** tugmasini bosib, lokatsiyangizni yuboring.",
+                    text="⏰ **Ish vaqti tugadi!**\n\nIltimos, agar ishni yakunlasangiz **🔴 Ishni yakunlash** tugmasini bosing.\nAgar qo'shimcha ishlamoqchi bo'lsangiz, **⏰ Qo'shimcha ishlash** tugmasini bosib lokatsiya yuboring.",
                     reply_markup=xodim_klaviatura()
                 )
             except:
                 pass
-    await bot.send_message(ADMIN_ID, "📢 Xodimlarga soat 17:00 eslatmasi avtomat yuborildi.")
-
-def xodim_klaviatura():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🟢 Ishni boshlash", request_location=True)],
-        [KeyboardButton(text="🔴 Ishni yakunlash", request_location=True)]
-    ], resize_keyboard=True)
-
-def admin_klaviatura():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📊 Xodimlar hisoboti (Buxgalteriya)")]
-    ], resize_keyboard=True)
-
-@dp.message(F.text == "/start")
-async def cmd_start(m: Message, state: FSMContext):
-    user_id = m.from_user.id
-    await state.clear()
-    
-    if user_id == ADMIN_ID:
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Bot yangilangan oyliklar bilan sozlangan holatda ishga tushdi.", reply_markup=admin_klaviatura())
-        return
-
-    if user_id in tizim_baza and tizim_baza[user_id].get('tasdiqlangan', False):
-        ism = tizim_baza[user_id]['ism']
-        await m.answer(f"✨ Xush kelibsiz, {ism}!\nKelim-ketimni qayd etish uchun quyidagi tugmalardan foydalaning:", reply_markup=xodim_klaviatura())
-    else:
-        await m.answer("📌 Botdan foydalanish uchun ro'yxatdagi to'liq ismingizni kiriting (Masalan: Sevinch, Charos, Ozodbek):")
-        await state.set_state(BotStates.ism_kutish)
-
-@dp.message(BotStates.ism_kutish)
-async def process_name(m: Message, state: FSMContext):
-    xodim_ismi = m.text.strip()
-    user_id = m.from_user.id
-    if xodim_ismi.startswith("/"): return
-    
-    topilgan_ism = None
-    for k in XODIMLAR_BAZASI.keys():
-        if k.lower() == xodim_ismi.lower():
-            topilgan_ism = k
-            break
-            
-    if not topilgan_ism:
-        ismlar_listi = ", ".join(XODIMLAR_BAZASI.keys())
-        await m.answer(f"❌ Bunday ismli xodim ro'yxatda yo'q!\nIltimos, ismingizni quyidagilardan biri shaklida aniq yozing:\n`{ismlar_listi}`")
-        return
-        
-    await state.clear()
-    
-    tizim_baza[user_id] = {
-        "ism": topilgan_ism,
-        "tasdiqlangan": True,
-        "came": False,
-        "start_time": None,
-        "jami_minut": 0,
-        "jami_soat": 0,
-        "jami_kun": 0
-    }
-    
-    await m.answer(f"✅ Rahmat, {topilgan_ism}! Tizimga muvaffaqiyatli ulandingiz.", reply_markup=xodim_klaviatura())
-    await bot.send_message(ADMIN_ID, f"🔔 **Yangi xodim botga kirdi:** {topilgan_ism} (ID: {user_id})")
-
-@dp.message(F.location)
-async def handle_location(m: Message):
-    user_id = m.from_user.id
-    if user_id == ADMIN_ID: return
-
-    if user_id not in tizim_baza:
-        await m.answer("📌 Iltimos, oldin /start buyrug'ini bosing.")
-        return
-        
-    xodim = tizim_baza[user_id]
-    xodim_ismi = xodim["ism"]
-    
-    masofa = masofani_hisobla(m.location.latitude, m.location.longitude, ISHXONA_LAT, ISHXONA_LON)
-    if masofa > MAKS_MASOFA:
-        await m.answer(f"❌ **Masofa xatoligi!** Siz ishxonada emassiz. Masofa: {int(masofa)} metr.")
-        return
-
-    hozir = datetime.now(UZ_TZ)
-
-    if not xodim['came']:
-        # 🟢 ISHNI BOSHLASH
-        xodim['start_time'] = hozir
-        xodim['came'] = True
-        matn = f"🟢 **{xodim_ismi}** ishni boshladi.\n⏰ Vaqt: {hozir.strftime('%H:%M:%S')}\n"
-        
-        # Kechikish minutini hisoblash (09:00 dan keyin kelsa)
-        if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
-            kechikish = (hozir.hour - 9) * 60 + hozir.minute
-            xodim['jami_minut'] += kechikish
-            matn += f"⚠️ {kechikish} minut kechikdi (Oylikdan chegiriladi)."
-        else:
-            matn += "✅ Vaqtida keldi."
-            
-        await bot.send_message(ADMIN_ID, f"🔔 **Keldi hisoboti:**\n{matn}")
-        await m.answer(f"✅ Ish boshlash vaqtingiz yozildi: {hozir.strftime('%H:%M')}")
-    else:
-        # 🔴 ISHNI YAKUNLASH
-        start_vaqt = xodim['start_time']
-        xodim['came'] = False
-        
-        farq_soniya = (hozir - start_vaqt).total_seconds()
-        # Obed vaqtini chegirish
-        if start_vaqt.hour < 13 and hozir.hour >= 14:
-            farq_soniya -= 3600
-            
-        ishlangan_soat = int(farq_soniya // 3600)
-        if ishlangan_soat < 1: ishlangan_soat = 1
-        
-        xodim['jami_soat'] += ishlangan_soat
-        xodim['jami_kun'] += 1
-        
-        await bot.send_message(ADMIN_ID, f"🔔 **Ketdi hisoboti:**\n👤 {xodim_ismi}\n📅 Bugun ishladi: {ishlangan_soat} soat")
-        await m.answer(f"🔴 Ish yakunlandi vaqtingiz yozildi: {hozir.strftime('%H:%M')}\nSoat va kun hisobga qo'shildi.")
-
-@dp.message(F.text == "📊 Xodimlar hisoboti (Buxgalteriya)")
-async def admin_report(m: Message):
-    if m.from_user.id != ADMIN_ID: return
-    
-    if not tizim_baza:
-        await m.answer("📊 Hozircha xodimlar ma'lumotlar bazasi bo'sh.")
-        return
-        
-    matn = "📊 **BUXGALTERIYA VA OYLIK HISOBOTI**\n\n"
-    
-    for uid, data in tizim_baza.items():
-        ism = data['ism']
-        stavka = XODIMLAR_BAZASI[ism]
-        
-        minut = data['jami_minut']
-        soat = data['jami_soat']
-        kun = data['jami_kun']
-        oylik = stavka['oylik']
-        
-        # 🧮 EXCEL FORMULANGIZ (image_ff6d40.png bo'yicha)
-        vazvirat = minut * stavka['minut_narxi']
-        qo_shimcha_soat = soat * stavka['soat_narxi']
-        qo_shimcha_kun = kun * stavka['kun_narxi']
-        
-        # Yakuniy hisob: oylikdan minutlar narxi ayriladi, soat va kun pullari qo'shiladi
-        bugalter_summa = oylik - vazvirat + qo_shimcha_soat + qo_shimcha_kun
-        if bugalter_summa < 0: bugalter_summa = 0
-        
-        matn += f"👤 **Xodim:** {ism}\n"
-        matn += f"⏱ Kechikkan vaqti: {minut} minut\n"
-        matn += f"👔 Qo'shimcha soati: {soat} soat\n"
-        matn += f"📅 Qo'shimcha kuni: {kun} kun\n"
-        matn += f"📉 Qilingan vazvirat (Jarimalar): {vazvirat:,.2f} so'm\n"
-        matn += f"💵 Asosiy oylik maoshi: {oylik:,.2f} so'm\n"
-        matn += f"💰 🟢 **Bug'alter beradigan summa:** {bugalter_summa:,.2f} so'm\n"
-        matn += "--------------------------------------\n"
-        
-    await m.answer(matn)
-
-async def handle_ping(request):
-    return web.Response(text="Bot Active", status=200)
-
-async def main():
-    # Taymer: Har kuni soat 17:00 da avtomat ishlaydi
-    scheduler.add_job(kunlik_eslatma, 'cron', hour=17, minute=0)
-    scheduler.start()
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(dp.start_polling(bot))
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    port = int(os.environ.get("PORT", 8080))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    await bot.send_message(ADMIN_ID, "📢 Xodimlarga soat 17:00
