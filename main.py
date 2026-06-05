@@ -12,7 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# 🚨 ASOSIY TIZIM SOZLAMALARI
+# 🚨 ASOSIY TIZIM SOZLAMALARI (YANGI TOKEN)
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 
@@ -56,6 +56,11 @@ def init_db():
             bugungi_tarix TEXT DEFAULT 'Hali ma''lumot yo''q'
         )
     """)
+    # Eski bazaga ega bo'lsangiz, 'bugungi_tarix' ustuni yo'q bo'lsa xato bermasligi uchun:
+    try:
+        cursor.execute("ALTER TABLE xodimlar ADD COLUMN bugungi_tarix TEXT DEFAULT 'Hali ma''lumot yo''q'")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -95,7 +100,7 @@ def update_xodim(tg_id, **kwargs):
     conn.commit()
     conn.close()
 
-# ⏰ HAR KUNI SOAT 20:00 DA AVTOMATIK TOZALASH VA JARIMA
+# ⏰ KUNLIK TOZALASH VA JARIMA (SOAT 20:00 DA)
 async def kunlik_tekshiruv():
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
@@ -113,7 +118,7 @@ async def kunlik_tekshiruv():
                     WHERE tg_id = ?
                 """, (yangi_kelmagan, row['tg_id']))
                 try:
-                    await bot.send_message(row['tg_id'], "⚠️ **Kunlik hisobot:** Bugun ishga kelganingiz qayd etilmadi. Oyligingizdan 1 kunlik (8 soat) ish haqi chegirildi.")
+                    await bot.send_message(row['tg_id'], "⚠️ **Kunlik hisobot:** Bugun ishga kelganingiz qayd etilmadi. Oyligingizdan 1 kunlik ish haqi chegirildi.")
                 except: pass
     
     cursor.execute("UPDATE xodimlar SET came = 0, obedda = 0, overtime_active = 0, bugun_keldi = 0")
@@ -193,7 +198,7 @@ async def process_name(m: Message, state: FSMContext):
     
     await m.answer(f"✅ Rahmat, {topilgan_ism}! Tizimga muvaffaqiyatli ulandingiz.", reply_markup=xodim_klaviatura())
 
-# 📊 HAR KIM O'ZINING SHAXSIY HISOBOTINI KO'RISH TUGMASI
+# 📊 SHAXSIY HISOBOT TUGMASI (FAQAT O'ZI UCHUN)
 @dp.message(F.text == "📊 Mening shaxsiy hisobotim 💰")
 async def shaxsiy_hisobot(m: Message):
     xodim = get_xodim(m.from_user.id)
@@ -340,7 +345,7 @@ async def clear_balances(m: Message):
     conn.close()
     await m.answer("✅ Barcha xodimlarning oylik hisob-kitoblari 0 ga tushirildi va yangi oydan boshlandi.")
 
-# 🖥 DYNAMIC HTML WEB-DASHBOARD (ADMIN KO'RISHI UCHUN)
+# 🖥 ONLAYN LIVE WEB-DASHBOARD (Siz ko'radigan qism)
 async def handle_dashboard(request):
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
@@ -365,7 +370,6 @@ async def handle_dashboard(request):
         
         status_badge = '<span style="background:#e8f5e9;color:#2e7d32;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;">Ishda</span>' if r['came'] else '<span style="background:#ffebee;color:#c62828;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;">Ishda emas</span>'
         
-        # Kunlik xronologiyani html-da chiroyli qatorlar qilish uchun
         tarix_html = r['bugungi_tarix'].replace('\n', '<br>')
 
         table_rows += f"""
