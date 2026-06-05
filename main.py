@@ -16,12 +16,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
 ADMIN_ID = 8252424738
 
-# 📍 LOKATSIYA VA MASOFA
+# 📍 ISHXONA KOORDINATASI VA CHEGARA MASOFASI
 ISHXONA_LAT = 39.745430   
 ISHXONA_LON = 64.439307   
 MAKS_MASOFA = 150         
 
-# 💰 STAVKALAR BAZASI (Oylikdan ayirish mantiqi uchun)
+# 💰 JADVALDAGI BARCHA STAVKALAR
 XODIMLAR_BAZASI = {
     "Sevinch":      {"oylik": 4000000, "minut_narxi": 14743.59, "soat_narxi": 0.0,       "kun_narxi": 0.0},
     "Charos":       {"oylik": 6000000, "minut_narxi": 3846.15,  "soat_narxi": 201923.08, "kun_narxi": 0.0},
@@ -34,11 +34,10 @@ XODIMLAR_BAZASI = {
     "Avazbek":      {"oylik": 2000000, "minut_narxi": 801.28,   "soat_narxi": 0.0,       "kun_narxi": 0.0}
 }
 
-# 🗄 SQLITE MA'LUMOTLAR BAZASINI SOZLACH
+# 🗄 MA'LUMOTLAR BAZASI
 def init_db():
     conn = sqlite3.connect("davomat.db")
     cursor = conn.cursor()
-    # Xodimlar holati jadvali
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS xodimlar (
             tg_id INTEGER PRIMARY KEY,
@@ -53,7 +52,8 @@ def init_db():
             jami_minut INTEGER DEFAULT 0,
             jami_soat INTEGER DEFAULT 0,
             kelmagan_kunlar INTEGER DEFAULT 0,
-            obed_minutlari INTEGER DEFAULT 0
+            obed_minutlari INTEGER DEFAULT 0,
+            bugungi_tarix TEXT DEFAULT 'Hali ma''lumot yo''q'
         )
     """)
     conn.commit()
@@ -77,7 +77,6 @@ def masofani_hisobla(lat1, lon1, lat2, lon2):
     c = 2 * asin(sqrt(a)) 
     return c * 6371000
 
-# Baza bilan xavfsiz ishlash funksiyalari
 def get_xodim(tg_id):
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
@@ -96,7 +95,7 @@ def update_xodim(tg_id, **kwargs):
     conn.commit()
     conn.close()
 
-# ⏰ HAR KUNI SOAT 20:00 DA ISHGA KELMAGANLARNI TEKSHIRISH (8 SOAT AYIRISH MALIKASI)
+# ⏰ HAR KUNI SOAT 20:00 DA AVTOMATIK TOZALASH VA JARIMA
 async def kunlik_tekshiruv():
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
@@ -108,15 +107,18 @@ async def kunlik_tekshiruv():
         if row['tg_id'] != ADMIN_ID:
             if not row['bugun_keldi']:
                 yangi_kelmagan = row['kelmagan_kunlar'] + 1
-                cursor.execute("UPDATE xodimlar SET kelmagan_kunlar = ? WHERE tg_id = ?", (yangi_kelmagan, row['tg_id']))
+                cursor.execute("""
+                    UPDATE xodimlar 
+                    SET kelmagan_kunlar = ?, bugungi_tarix = '❌ Bugun ishga kelmadi (Jarima 8 soat)' 
+                    WHERE tg_id = ?
+                """, (yangi_kelmagan, row['tg_id']))
                 try:
-                    await bot.send_message(row['tg_id'], "⚠️ **Ogohlantirish!** Bugun ishga kelganingiz qayd etilmadi. Oyligingizdan 1 kunlik (8 soat) ish haqi chegirildi.")
+                    await bot.send_message(row['tg_id'], "⚠️ **Kunlik hisobot:** Bugun ishga kelganingiz qayd etilmadi. Oyligingizdan 1 kunlik (8 soat) ish haqi chegirildi.")
                 except: pass
     
-    cursor.execute("UPDATE xodimlar SET bugun_keldi = 0, came = 0, obedda = 0, overtime_active = 0")
+    cursor.execute("UPDATE xodimlar SET came = 0, obedda = 0, overtime_active = 0, bugun_keldi = 0")
     conn.commit()
     conn.close()
-    await bot.send_message(ADMIN_ID, "📢 Kun yakunlandi. Kelmagan xodimlardan 8 soatlik jarima hisoblandi va dashboard yangilandi.")
 
 async def kunlik_eslatma():
     conn = sqlite3.connect("davomat.db")
@@ -127,7 +129,7 @@ async def kunlik_eslatma():
     for row in ids:
         if row[0] != ADMIN_ID:
             try:
-                await bot.send_message(row[0], "⏰ **Ish vaqti tugadi!**\n\nIltimos, qaytishda tugmalarni bosing.", reply_markup=xodim_klaviatura())
+                await bot.send_message(row[0], "⏰ **Ish vaqti tugadi!**\nIltimos, qaytish vaqtini belgilashni unutmang.", reply_markup=xodim_klaviatura())
             except: pass
 
 def xodim_klaviatura():
@@ -135,12 +137,13 @@ def xodim_klaviatura():
         [KeyboardButton(text="🟢 Ishni boshlash", request_location=True)],
         [KeyboardButton(text="🥪 Obedga chiqish"), KeyboardButton(text="🔙 Obeddan qaytish")],
         [KeyboardButton(text="⏰ Qo'shimcha ishlash", request_location=True)],
-        [KeyboardButton(text="🔴 Ishni yakunlash", request_location=True)]
+        [KeyboardButton(text="🔴 Ishni yakunlash", request_location=True)],
+        [KeyboardButton(text="📊 Mening shaxsiy hisobotim 💰")]
     ], resize_keyboard=True)
 
 def admin_klaviatura():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📊 Xodimlar hisoboti (Buxgalteriya)")],
+        [KeyboardButton(text="📊 Hamma xodimlar hisoboti (Buxgalteriya)")],
         [KeyboardButton(text="💰 Buxgalter hamma summani tashlab berdi")]
     ], resize_keyboard=True)
 
@@ -150,12 +153,12 @@ async def cmd_start(m: Message, state: FSMContext):
     await state.clear()
     
     if user_id == ADMIN_ID:
-        await m.answer("👑 Xush kelibsiz Jahongir aka! Web Boshqaruv paneli ishga tushdi.", reply_markup=admin_klaviatura())
+        await m.answer("👑 Xush kelibsiz Jahongir aka! Tizim boshqaruv paneliga ulandi.", reply_markup=admin_klaviatura())
         return
 
     xodim = get_xodim(user_id)
     if xodim:
-        await m.answer(f"✨ Xush kelibsiz, {xodim['ism']}!\nTugmalardan foydalanib vaqtingizni qayd eting:", reply_markup=xodim_klaviatura())
+        await m.answer(f"✨ Xush kelibsiz, {xodim['ism']}!\nQuyidagi tugmalardan foydalanib vaqtni qayd eting:", reply_markup=xodim_klaviatura())
     else:
         await m.answer("📌 Botdan foydalanish uchun ro'yxatdagi ismingizni kiriting (Masalan: Sevinch, Charos):")
         await state.set_state(BotStates.ism_kutish)
@@ -174,7 +177,7 @@ async def process_name(m: Message, state: FSMContext):
             
     if not topilgan_ism:
         ismlar_listi = ", ".join(XODIMLAR_BAZASI.keys())
-        await m.answer(f"❌ Ism topilmadi!\nTo'g'ri kiriting:\n`{ismlar_listi}`")
+        await m.answer(f"❌ Ism ro'yxatdan topilmadi!\nQuyidagilardan birini kiriting:\n`{ismlar_listi}`")
         return
         
     await state.clear()
@@ -182,21 +185,50 @@ async def process_name(m: Message, state: FSMContext):
     conn = sqlite3.connect("davomat.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT OR REPLACE INTO xodimlar (tg_id, ism, jami_minut, jami_soat, kelmagan_kunlar, obed_minutlari)
-        VALUES (?, ?, 0, 0, 0, 0)
+        INSERT OR REPLACE INTO xodimlar (tg_id, ism, jami_minut, jami_soat, kelmagan_kunlar, obed_minutlari, bugungi_tarix)
+        VALUES (?, ?, 0, 0, 0, 0, 'Hali ma''lumot yo''q')
     """, (user_id, topilgan_ism))
     conn.commit()
     conn.close()
     
-    await m.answer(f"✅ Rahmat, {topilgan_ism}! Tizimga ulandingiz.", reply_markup=xodim_klaviatura())
-    await bot.send_message(ADMIN_ID, f"🔔 **Yangi xodim qo'shildi:** {topilgan_ism}")
+    await m.answer(f"✅ Rahmat, {topilgan_ism}! Tizimga muvaffaqiyatli ulandingiz.", reply_markup=xodim_klaviatura())
+
+# 📊 HAR KIM O'ZINING SHAXSIY HISOBOTINI KO'RISH TUGMASI
+@dp.message(F.text == "📊 Mening shaxsiy hisobotim 💰")
+async def shaxsiy_hisobot(m: Message):
+    xodim = get_xodim(m.from_user.id)
+    if not xodim: 
+        await m.answer("Siz ro'yxatdan o'tmagansiz.")
+        return
+        
+    ism = xodim['ism']
+    st = XODIMLAR_BAZASI[ism]
+    vaz = xodim['jami_minut'] * st['minut_narxi']
+    k_narx = st['kun_narxi'] if st['kun_narxi'] > 0 else (st['oylik'] / 26)
+    kel_jar = xodim['kelmagan_kunlar'] * k_narx
+    yakuniy = st['oylik'] - vaz - kel_jar + (xodim['jami_soat'] * st['soat_narxi'])
+    
+    hisobot_matn = f"👤 **Xodim:** {ism}\n" \
+                   f"💰 **Asosiy oylik stavka:** {st['oylik']:,.0f} so'm\n" \
+                   f"───────────────────\n" \
+                   f"⏱ **Jami kechikish vaqti:** {xodim['jami_minut']} minut\n" \
+                   f"⏰ **Jami qo'shimcha soat:** {xodim['jami_soat']} soat\n" \
+                   f"❌ **Kelmagan kunlar:** {xodim['kelmagan_kunlar']} kun\n" \
+                   f"───────────────────\n" \
+                   f"📅 **Bugungi davomat holatingiz:**\n`{xodim['bugungi_tarix']}`\n" \
+                   f"───────────────────\n" \
+                   f"💵 **Hozirgi toza oylik balansingiz (Qo'lga):** {max(0, yakuniy):,.0f} so'm"
+                   
+    await m.answer(hisobot_matn, parse_mode="Markdown")
 
 @dp.message(F.text == "🥪 Obedga chiqish")
 async def obed_boshlash(m: Message):
     xodim = get_xodim(m.from_user.id)
     if not xodim or not xodim['came']: return
     
-    update_xodim(m.from_user.id, obedda=1, obed_start=datetime.now(UZ_TZ).isoformat())
+    hozir = datetime.now(UZ_TZ)
+    tarix = xodim['bugungi_tarix'] + f"\n🥪 Obedga chiqdi: {hozir.strftime('%H:%M')}"
+    update_xodim(m.from_user.id, obedda=1, obed_start=hozir.isoformat(), bugungi_tarix=tarix)
     await m.answer("🥪 Obed vaqtingiz boshlandi. Yoqimli ishtaha!")
 
 @dp.message(F.text == "🔙 Obeddan qaytish")
@@ -209,8 +241,9 @@ async def obed_tugatish(m: Message):
     obed_minut = max(1, int((hozir - obed_start).total_seconds() // 60))
     
     yangi_obed = xodim['obed_minutlari'] + obed_minut
-    update_xodim(m.from_user.id, obedda=0, obed_minutlari=yangi_obed)
-    await m.answer(f"🔙 Obeddan qaytdingiz. Obed davomiyligi: {obed_minut} minut.")
+    tarix = xodim['bugungi_tarix'] + f"\n🔙 Obeddan qaytdi: {hozir.strftime('%H:%M')} ({obed_minut} min)"
+    update_xodim(m.from_user.id, obedda=0, obed_minutlari=yangi_obed, bugungi_tarix=tarix)
+    await m.answer(f"🔙 Obeddan qaytdingiz. Davomiyligi: {obed_minut} minut.")
 
 @dp.message(F.location)
 async def handle_location(m: Message):
@@ -225,27 +258,31 @@ async def handle_location(m: Message):
 
     hozir = datetime.now(UZ_TZ)
 
-    # Qo'shimcha ishlash
+    # ⏰ Qo'shimcha ishlash
     if m.reply_markup and any(b.text == "⏰ Qo'shimcha ishlash" for row in m.reply_markup.keyboard for b in row if hasattr(b, 'text')):
         if not xodim['came']: return
-        update_xodim(user_id, overtime_active=1, overtime_start=hozir.isoformat())
+        tarix = xodim['bugungi_tarix'] + f"\n⏰ Overtime boshladi: {hozir.strftime('%H:%M')}"
+        update_xodim(user_id, overtime_active=1, overtime_start=hozir.isoformat(), bugungi_tarix=tarix)
         await m.answer(f"⏰ Qo'shimcha ishlash vaqti boshlandi: {hozir.strftime('%H:%M')}")
         return
 
-    # Ishni boshlash
+    # 🟢 Ishni boshlash
     if not xodim['came']:
         kechikish = 0
         if hozir.hour > 9 or (hozir.hour == 9 and hozir.minute > 0):
             kechikish = (hozir.hour - 9) * 60 + hozir.minute
             
         yangi_minut = xodim['jami_minut'] + kechikish
-        update_xodim(user_id, came=1, bugun_keldi=1, start_time=hozir.isoformat(), jami_minut=yangi_minut)
+        tarix = f"🟢 Ishga keldi: {hozir.strftime('%H:%M')}"
+        if kechikish > 0: tarix += f" (Kechikish: {kechikish} min)"
+        
+        update_xodim(user_id, came=1, bugun_keldi=1, start_time=hozir.isoformat(), jami_minut=yangi_minut, bugungi_tarix=tarix)
         
         msg = f"✅ Ish boshlandi. Vaqt: {hozir.strftime('%H:%M')}"
         if kechikish > 0: msg += f"\n⚠️ Siz bugun {kechikish} minut kechikdingiz."
         await m.answer(msg)
     
-    # Ishni yakunlash
+    # 🔴 Ishni yakunlash
     else:
         start_vaqt = datetime.fromisoformat(xodim['start_time'])
         overtime_minut = 0
@@ -260,10 +297,13 @@ async def handle_location(m: Message):
         yangi_minut = max(0, xodim['jami_minut'] - overtime_minut)
         yangi_soat = xodim['jami_soat'] + ishlangan_soat
         
-        update_xodim(user_id, came=0, overtime_active=0, jami_minut=yangi_minut, jami_soat=yangi_soat, obed_minutlari=0)
+        tarix = xodim['bugungi_tarix'] + f"\n🔴 Ishni yakunladi: {hozir.strftime('%H:%M')} (Sof ish vaqti: {ishlangan_soat} soat)"
+        
+        update_xodim(user_id, came=0, overtime_active=0, jami_minut=yangi_minut, jami_soat=yangi_soat, obed_minutlari=0, bugungi_tarix=tarix)
         await m.answer(f"🔴 Ish yakunlandi. Bugun sof {ishlangan_soat} soat ishladingiz.")
 
-@dp.message(F.text == "📊 Xodimlar Hisoboti (Buxgalteriya)" or F.text == "📊 Xodimlar hisoboti (Buxgalteriya)")
+# ADMIN PANEL: TEXT REPORT
+@dp.message(F.text == "📊 Hamma xodimlar hisoboti (Buxgalteriya)")
 async def text_report(m: Message):
     if m.from_user.id != ADMIN_ID: return
     conn = sqlite3.connect("davomat.db")
@@ -277,7 +317,7 @@ async def text_report(m: Message):
         await m.answer("Baza bo'sh.")
         return
         
-    matn = "📊 **BUXGALTERIYA HISOBOTI**\n\n"
+    matn = "📊 **UMUMIY BUXGALTERIYA HISOBOTI**\n\n"
     for r in rows:
         ism = r['ism']
         if ism not in XODIMLAR_BAZASI: continue
@@ -287,7 +327,7 @@ async def text_report(m: Message):
         kel_jar = r['kelmagan_kunlar'] * k_narx
         yakuniy = st['oylik'] - vaz - kel_jar + (r['jami_soat'] * st['soat_narxi'])
         
-        matn += f"👤 **{ism}**:\n⏱ Kechikish: {r['jami_minut']} m | ❌ Kelmagan: {r['kelmagan_kunlar']} kun\n💰 **Qo'lga tegadigani:** {max(0, yakuniy):,.2f} so'm\n"
+        matn += f"👤 **{ism}**:\n⏱ Kechikish: {r['jami_minut']} m | ❌ Kelmagan: {r['kelmagan_kunlar']} kun\n💰 **Oylik (Qo'lga):** {max(0, yakuniy):,.0f} so'm\n\n"
     await m.answer(matn)
 
 @dp.message(F.text == "💰 Buxgalter hamma summani tashlab berdi")
@@ -295,12 +335,12 @@ async def clear_balances(m: Message):
     if m.from_user.id != ADMIN_ID: return
     conn = sqlite3.connect("davomat.db")
     cursor = conn.cursor()
-    cursor.execute("UPDATE xodimlar SET jami_minut=0, jami_soat=0, kelmagan_kunlar=0, came=0, obedda=0")
+    cursor.execute("UPDATE xodimlar SET jami_minut=0, jami_soat=0, kelmagan_kunlar=0, came=0, obedda=0, bugungi_tarix='Hali ma''lumot yo''q'")
     conn.commit()
     conn.close()
-    await m.answer("✅ Barcha xodimlarning oylik hisob-kitoblari 0 ga tushirildi.")
+    await m.answer("✅ Barcha xodimlarning oylik hisob-kitoblari 0 ga tushirildi va yangi oydan boshlandi.")
 
-# 🖥 DYNAMIC HTML WEB-DASHBOARD (image_b683a2.png DIZAYNI ASOSIDA)
+# 🖥 DYNAMIC HTML WEB-DASHBOARD (ADMIN KO'RISHI UCHUN)
 async def handle_dashboard(request):
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
@@ -323,47 +363,51 @@ async def handle_dashboard(request):
         kel_jar = r['kelmagan_kunlar'] * k_narx
         yakuniy = st['oylik'] - vazvirat - kel_jar + (r['jami_soat'] * st['soat_narxi'])
         
-        status_badge = '<span style="background:#e8f5e9;color:#2e7d32;padding:4px 8px;border-radius:6px;font-size:12px;">Ishda</span>' if r['came'] else '<span style="background:#ffebee;color:#c62828;padding:4px 8px;border-radius:6px;font-size:12px;">Ketgan/Kelmagan</span>'
+        status_badge = '<span style="background:#e8f5e9;color:#2e7d32;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;">Ishda</span>' if r['came'] else '<span style="background:#ffebee;color:#c62828;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;">Ishda emas</span>'
         
+        # Kunlik xronologiyani html-da chiroyli qatorlar qilish uchun
+        tarix_html = r['bugungi_tarix'].replace('\n', '<br>')
+
         table_rows += f"""
-        <tr style="border-bottom: 1px solid #f0f0f0;">
-            <td style="padding: 15px; font-weight: 600; color: #333;">{ism}</td>
-            <td style="padding: 15px;">{status_badge}</td>
-            <td style="padding: 15px; color: #c62828; font-weight: 600;">{r['jami_minut']} min</td>
-            <td style="padding: 15px; color: #2e7d32; font-weight: 600;">{r['jami_soat']} soat</td>
-            <td style="padding: 15px; color: #e65100;">{r['kelmagan_kunlar']} kun</td>
-            <td style="padding: 15px; font-weight: bold; color: #ff9800;">{st['oylik']:,.0f} UZS</td>
-            <td style="padding: 15px; font-weight: bold; color: #1e88e5;">{max(0, yakuniy):,.0f} UZS</td>
+        <tr style="border-bottom: 1px solid #f1f3f9;">
+            <td style="padding: 16px 20px; font-weight: 600; color: #2c3e50;">{ism}</td>
+            <td style="padding: 16px 20px;">{status_badge}</td>
+            <td style="padding: 16px 20px; font-size: 13px; color:#555; line-height: 1.4;">{tarix_html}</td>
+            <td style="padding: 16px 20px; color: #e74c3c; font-weight: 600;">{r['jami_minut']} min</td>
+            <td style="padding: 16px 20px; color: #2ecc71; font-weight: 600;">{r['jami_soat']} soat</td>
+            <td style="padding: 16px 20px; color: #e67e22; font-weight: 600;">{r['kelmagan_kunlar']} kun</td>
+            <td style="padding: 16px 20px; font-weight: 700; color: #2c3e50; font-size:15px;">{max(0, yakuniy):,.0f} UZS</td>
         </tr>
         """
         
     html_content = f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="uz">
     <head>
         <meta charset="UTF-8">
-        <title>SHERIN - Davomat Boshqaruv Paneli</title>
+        <title>Boshqaruv paneli - TIMEPAY</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }}
-            body {{ background: #f8f9fa; padding: 30px; }}
-            .header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom: 30px; }}
-            .title {{ font-size: 24px; font-weight: 700; color: #222; }}
-            .stats-container {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }}
-            .card {{ background: white; padding: 25px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); display: flex; justify-content: space-between; align-items: center; border: 1px solid #f0f0f0; }}
-            .card-title {{ font-size: 14px; color: #666; font-weight: 600; text-transform: uppercase; }}
-            .card-value {{ font-size: 28px; font-weight: 700; color: #222; margin-top: 5px; }}
-            .card-icon {{ width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }}
-            .table-container {{ background: white; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); padding: 20px; border: 1px solid #f0f0f0; }}
-            .table-title {{ font-size: 18px; font-weight: 700; margin-bottom: 20px; color: #333; }}
+            body {{ background: #f4f6f9; padding: 30px; color: #333; }}
+            .header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom: 35px; }}
+            .title {{ font-size: 26px; font-weight: 700; color: #2c3e50; }}
+            .stats-container {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-bottom: 35px; }}
+            .card {{ background: white; padding: 25px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); display: flex; justify-content: space-between; align-items: center; border: 1px solid #eef2f5; }}
+            .card-title {{ font-size: 13px; color: #8a99a8; font-weight: 600; text-transform: uppercase; }}
+            .card-value {{ font-size: 32px; font-weight: 700; color: #2c3e50; margin-top: 6px; }}
+            .card-icon {{ width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 22px; }}
+            .table-container {{ background: white; border-radius: 18px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); padding: 25px; border: 1px solid #eef2f5; }}
+            .table-title {{ font-size: 19px; font-weight: 700; margin-bottom: 22px; color: #2c3e50; }}
             table {{ width: 100%; border-collapse: collapse; text-align: left; }}
-            th {{ padding: 15px; color: #666; font-weight: 600; font-size: 13px; text-transform: uppercase; border-bottom: 2px solid #f0f0f0; }}
+            th {{ padding: 16px 20px; color: #8a99a8; font-weight: 600; font-size: 12px; text-transform: uppercase; border-bottom: 2px solid #eef2f5; }}
+            tr:hover {{ background-color: #f8fafc; }}
         </style>
     </head>
     <body>
         <div class="header">
-            <div class="title">📋 Boshqaruv paneli <span style="font-size:14px; color:#888; font-weight:normal;">/ Sherin Tizimi</span></div>
-            <div style="background:white; padding:10px 20px; border-radius:10px; font-weight:600; border:1px solid #e0e0e0;"><i class="fa-regular fa-calendar-days"></i> Cani: {datetime.now(UZ_TZ).strftime('%d.%m.2026')}</div>
+            <div class="title">Boshqaruv paneli <span style="font-size:15px; color:#95a5a6; font-weight:normal; margin-left:10px;">/ Sherin Bakery</span></div>
+            <div style="background:white; padding:12px 24px; border-radius:12px; font-weight:600; color:#2c3e50; border:1px solid #eef2f5;"><i class="fa-regular fa-calendar-days" style="margin-right:8px;color:#3498db;"></i> {datetime.now(UZ_TZ).strftime('%d.%m.2026')}</div>
         </div>
         
         <div class="stats-container">
@@ -373,10 +417,10 @@ async def handle_dashboard(request):
             </div>
             <div class="card">
                 <div><div class="card-title">Ishda</div><div class="card-value">{ishda}</div></div>
-                <div class="card-icon" style="background:#e0f2f1; color:#004d40;"><i class="fa-solid fa-user-check"></i></div>
+                <div class="card-icon" style="background:#e0f2f1; color:#004d40;"><i class="fa-solid fa-briefcase"></i></div>
             </div>
             <div class="card">
-                <div><div class="card-title">Kechikkanlar</div><div class="card-value">{kechikkanlar}</div></div>
+                <div><div class="card-title">Kech</div><div class="card-value">{kechikkanlar}</div></div>
                 <div class="card-icon" style="background:#fff3e0; color:#e65100;"><i class="fa-solid fa-user-clock"></i></div>
             </div>
             <div class="card">
@@ -386,17 +430,17 @@ async def handle_dashboard(request):
         </div>
 
         <div class="table-container">
-            <div class="table-title">Davomat va Buxgalteriya oylik balansi</div>
+            <div class="table-title">Bugungi Jonli Davomat Jadvali</div>
             <table>
                 <thead>
                     <tr>
                         <th>Xodim</th>
                         <th>Holati</th>
+                        <th>Bugungi Xronologiya (Kirish / Chiqish / Obed)</th>
                         <th>Jami Kechikish</th>
-                        <th>Qo'shimcha Soat</th>
-                        <th>Kelmagan Kunlari</th>
-                        <th>Asosiy Oylik</th>
-                        <th>Qo'lga Tegadigan Summa</th>
+                        <th>Qo'shimcha</th>
+                        <th>Kelmagan Kunlar</th>
+                        <th>Oylik (Qo'lga)</th>
                     </tr>
                 </thead>
                 <tbody>
