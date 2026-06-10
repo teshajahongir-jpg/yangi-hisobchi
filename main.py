@@ -111,14 +111,17 @@ def masofa(lat1, lon1, lat2, lon2):
 # =================== HISOBOT HISOBLASH ===================
 def hisobla(x):
     st = XODIMLAR[x["ism"]]
-    jarima_min  = (x["kechikish_min"] + x["erta_min"]) * st["minut_narxi"]
-    jarima_kun  = x["kelmagan_kun"] * st["kun_narxi"]
-    toza_oylik  = max(0, st["oylik"] - jarima_min - jarima_kun)
+    # FIX #1: kechikish va erta ketish alohida hisoblanadi
+    jarima_kechikish = x["kechikish_min"] * st["minut_narxi"]
+    jarima_erta      = x["erta_min"]      * st["minut_narxi"]
+    jarima_kun       = x["kelmagan_kun"]  * st["kun_narxi"]
+    toza_oylik       = max(0, st["oylik"] - jarima_kechikish - jarima_erta - jarima_kun)
     return {
-        "oylik":       st["oylik"],
-        "jarima_min":  jarima_min,
-        "jarima_kun":  jarima_kun,
-        "toza_oylik":  toza_oylik,
+        "oylik":            st["oylik"],
+        "jarima_kechikish": jarima_kechikish,
+        "jarima_erta":      jarima_erta,
+        "jarima_kun":       jarima_kun,
+        "toza_oylik":       toza_oylik,
     }
 
 # =================== AVTOMATIK VAZIFALAR ===================
@@ -126,26 +129,29 @@ async def eslatma_yubor():
     """17:45 da barcha xodimlarga eslatma"""
     conn = sqlite3.connect("davomat.db")
     c = conn.cursor()
-    c.execute("SELECT tg_id, ism FROM xodimlar")
+    c.execute("SELECT tg_id, ism FROM xodimlar WHERE came=1")  # FIX #2: faqat ishda bor xodimlarga
     rows = c.fetchall()
     conn.close()
     for tg_id, ism in rows:
-        if tg_id == ADMIN_ID: continue
+        if tg_id == ADMIN_ID:
+            continue
         try:
             await bot.send_message(tg_id,
                 f"⏰ {ism}, ish vaqti 18:00 da tugaydi!\n"
                 f"Iltimos ketishdan oldin 🔴 Ketish tugmasini bosing.")
-        except: pass
+        except:
+            pass
 
 async def kechasi_tekshir():
-    """20:00 da kelmagan xodimlarga jarima"""
+    """20:00 da kelmagan xodimlarga jarima va kunlik holatni tozalash"""
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM xodimlar")
     rows = c.fetchall()
     for r in rows:
-        if r["tg_id"] == ADMIN_ID: continue
+        if r["tg_id"] == ADMIN_ID:
+            continue
         if not r["bugun_keldi"]:
             c.execute(
                 "UPDATE xodimlar SET kelmagan_kun=kelmagan_kun+1 WHERE tg_id=?",
@@ -155,10 +161,15 @@ async def kechasi_tekshir():
                 await bot.send_message(r["tg_id"],
                     "📋 Bugun ishga kelganingiz qayd etilmadi.\n"
                     "Oyligingizdan 1 kunlik ish haqi ushlanadi.")
-            except: pass
-    # Kunlik holatni tozala
-    c.execute("UPDATE xodimlar SET came=0, obedda=0, bugun_keldi=0, "
-              "obed_start=NULL, obed_minut=0, start_time=NULL, xronologiya=''")
+            except:
+                pass
+    # FIX #3: Kunlik holatni to'liq tozalash (obed_minut ham)
+    c.execute("""
+        UPDATE xodimlar SET
+            came=0, obedda=0, bugun_keldi=0,
+            start_time=NULL, obed_start=NULL,
+            obed_minut=0, xronologiya=''
+    """)
     conn.commit()
     conn.close()
 
@@ -185,10 +196,11 @@ async def ism_qabul(m: Message, state: FSMContext):
     if not topilgan:
         await m.answer("❌ Ism topilmadi. Qaytadan kiriting:\n" + ", ".join(XODIMLAR.keys()))
         return
+    # FIX #4: INSERT OR IGNORE — mavjud xodim ustiga yozilmasin
     conn = sqlite3.connect("davomat.db")
     c = conn.cursor()
     c.execute("""
-        INSERT OR REPLACE INTO xodimlar (tg_id, ism)
+        INSERT OR IGNORE INTO xodimlar (tg_id, ism)
         VALUES (?, ?)
     """, (m.from_user.id, topilgan))
     conn.commit()
@@ -201,7 +213,9 @@ async def ism_qabul(m: Message, state: FSMContext):
 async def lokatsiya(m: Message):
     uid = m.from_user.id
     x = get_xodim(uid)
-    if not x: return
+    if not x:
+        await m.answer("❌ Avval /start orqali ro'yxatdan o'ting.")
+        return
 
     m_masofa = masofa(m.location.latitude, m.location.longitude, ISHXONA_LAT, ISHXONA_LON)
     if m_masofa > MAKS_MASOFA:
@@ -217,15 +231,17 @@ async def lokatsiya(m: Message):
         if hozir.hour > ISH_BOSHLANISH or (hozir.hour == ISH_BOSHLANISH and hozir.minute > 0):
             kechikish = (hozir.hour - ISH_BOSHLANISH) * 60 + hozir.minute
 
+        # FIX #5: yangi kun uchun xronologiya yangi boshlanadi
         xron = f"🟢 Keldi: {vaqt_str}"
         if kechikish > 0:
             xron += f" (kechikish: {kechikish} min)"
 
         update_xodim(uid,
-            came=1, bugun_keldi=1,
+            came=1,
+            bugun_keldi=1,
             start_time=hozir.isoformat(),
             kechikish_min=x["kechikish_min"] + kechikish,
-            xronologiya=xron
+            xronologiya=xron   # yangi kun — eski xronologiya o'chiriladi
         )
 
         msg = f"✅ Kelish qayd etildi: {vaqt_str}"
@@ -235,10 +251,16 @@ async def lokatsiya(m: Message):
 
     # -------- KETISH --------
     else:
+        # FIX #6: obedda bo'lsa ketib bo'lmaydi
+        if x["obedda"]:
+            await m.answer("❌ Avval obeddan qaytishni qayd eting.")
+            return
+
         erta_min = 0
         if hozir.hour < ISH_TUGASH:
             erta_min = (ISH_TUGASH - hozir.hour) * 60 - hozir.minute
-            if erta_min < 0: erta_min = 0
+            if erta_min < 0:
+                erta_min = 0
 
         # Ishlangan vaqt
         start = datetime.fromisoformat(x["start_time"])
@@ -250,7 +272,8 @@ async def lokatsiya(m: Message):
             xron += f" ⚠️ Erta: {erta_min} min jarima"
 
         update_xodim(uid,
-            came=0, obedda=0,
+            came=0,
+            obedda=0,
             obed_minut=0,
             erta_min=x["erta_min"] + erta_min,
             xronologiya=xron
@@ -297,24 +320,26 @@ async def hisobotim(m: Message):
         await m.answer("Siz ro'yxatdan o'tmagansiz.")
         return
     h = hisobla(x)
+    # FIX #1: kechikish va erta ketish jarimalari alohida ko'rsatiladi
     matn = (
         f"👤 {x['ism']}\n"
         f"💰 Asosiy oylik: {h['oylik']:,.0f} so'm\n"
         f"─────────────────────\n"
-        f"⏱ Kechikish: {x['kechikish_min']} min  →  -{h['jarima_min']:,.0f} so'm\n"
-        f"🚶 Erta ketish: {x['erta_min']} min  →  -{h['jarima_min']:,.0f} so'm\n"
+        f"⏱ Kechikish: {x['kechikish_min']} min  →  -{h['jarima_kechikish']:,.0f} so'm\n"
+        f"🚶 Erta ketish: {x['erta_min']} min  →  -{h['jarima_erta']:,.0f} so'm\n"
         f"❌ Kelmagan: {x['kelmagan_kun']} kun  →  -{h['jarima_kun']:,.0f} so'm\n"
         f"─────────────────────\n"
         f"💵 Qo'lga: {h['toza_oylik']:,.0f} so'm\n"
         f"─────────────────────\n"
-        f"📅 Bugungi xronologiya:\n{x['xronologiya'] or 'Hali ma\'lumot yo\'q'}"
+        f"📅 Bugungi xronologiya:\n{x['xronologiya'] or 'Hali ma\\'lumot yo\\'q'}"
     )
     await m.answer(matn)
 
 # =================== ADMIN ===================
 @dp.message(F.text == "📋 Barcha xodimlar")
 async def barcha_xodimlar(m: Message):
-    if m.from_user.id != ADMIN_ID: return
+    if m.from_user.id != ADMIN_ID:
+        return
     conn = sqlite3.connect("davomat.db")
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -326,7 +351,8 @@ async def barcha_xodimlar(m: Message):
         return
     matn = "📋 BARCHA XODIMLAR HISOBOTI\n\n"
     for r in rows:
-        if r["ism"] not in XODIMLAR: continue
+        if r["ism"] not in XODIMLAR:
+            continue
         x = dict(r)
         h = hisobla(x)
         holat = "🟢 Ishda" if r["came"] else "⚪ Emas"
@@ -339,7 +365,8 @@ async def barcha_xodimlar(m: Message):
 
 @dp.message(F.text == "🗑 Oylikni nollash")
 async def nollash(m: Message):
-    if m.from_user.id != ADMIN_ID: return
+    if m.from_user.id != ADMIN_ID:
+        return
     conn = sqlite3.connect("davomat.db")
     c = conn.cursor()
     c.execute("""
