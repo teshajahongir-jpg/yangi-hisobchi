@@ -19,8 +19,8 @@ import uvicorn
 # =============================================
 # 1. SOZLAMALAR — bu yerlarni o'zgartiring!
 # =============================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "TOKEN_NI_BU_YERGA_YOZING")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))  # O'z Telegram ID-ingizni yozing
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "8252424738"))  # O'z Telegram ID-ingizni yozing
 
 OFFICE_LAT = 39.7747
 OFFICE_LON = 64.4286
