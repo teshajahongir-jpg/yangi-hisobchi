@@ -4,9 +4,7 @@ Xodimlar keldi-ketdi nazorati boti — to'liq versiya
 Xodim:  Ishni boshlash/yakunlash (lokatsiya bilan), Obed, Qo'shimcha ish, o'z hisoboti
 Admin:  jonli panel (kim ishda/obedda/ketgan/kelmagan), xodimlar boshqaruvi,
         kunlik/oylik hisobot, Excel eksport (buxgalteriya), hisobni nollash, sozlamalar
-Hisob:  har ishlagan kun uchun kun narxi yig'iladi, kechikish/uzun obed ayiriladi,
-        qo'shimcha ish qo'shiladi. Buxgalter to'lagach "nollash" bosiladi.
-Kutubxonalar: pip install aiogram apscheduler openpyxl
+Kutubxonalar: pip install aiogram apscheduler openpyxl aiohttp pytz
 """
 
 import os
@@ -14,13 +12,15 @@ import sqlite3
 import asyncio
 from math import radians, cos, sin, asin, sqrt
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+import pytz
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery, FSInputFile,
     KeyboardButton, ReplyKeyboardMarkup,
@@ -29,14 +29,15 @@ from aiogram.types import (
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ==================== SOZLAMALAR ====================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "-1003995667403"))
+BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
+# 💡 DIQQAT: Admin_ID faqat shaxsiy akkaunt ID raqami bo'lishi kerak!
+ADMIN_ID = 8252424738  
+
 ISH_KUNLARI = 26            # oyda nechta ish kuni
 DAM_KUNLARI = [6]           # 6 = yakshanba
-TZ = ZoneInfo("Asia/Tashkent")
+TZ = pytz.timezone("Asia/Tashkent")
 DB = "davomat.db"
 
-# Quyidagilar bazada saqlanadi va admin panelidan o'zgartiriladi:
 STANDART_SOZLAMALAR = {
     "ish_boshlanish": "09:00",
     "ish_tugash": "18:00",
@@ -48,7 +49,7 @@ STANDART_SOZLAMALAR = {
 # ====================================================
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 scheduler = AsyncIOScheduler(timezone=TZ)
 
 
@@ -79,7 +80,7 @@ def init_db():
             kechikish_min INTEGER DEFAULT 0,
             jarima INTEGER DEFAULT 0,
             daromad INTEGER DEFAULT 0,
-            holat TEXT DEFAULT 'ishda',     -- ishda / obedda / ketdi / kelmadi
+            holat TEXT DEFAULT 'ishda',
             tolangan INTEGER DEFAULT 0,
             UNIQUE(sana, telegram_id)
         )""")
@@ -91,6 +92,7 @@ def init_db():
                 "INSERT OR IGNORE INTO sozlamalar (kalit, qiymat) VALUES (?,?)", (k, v)
             )
 
+init_db()
 
 def sozlama(kalit: str) -> str:
     with db() as c:
@@ -145,7 +147,6 @@ def minut_narxi(oylik: int) -> float:
 
 
 def masofa_m(lat1, lon1) -> float:
-    """Haversine — yuborilgan nuqta bilan ofis orasidagi masofa (metr)."""
     lat2, lon2 = float(sozlama("lat")), float(sozlama("lon"))
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     a = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
@@ -157,7 +158,6 @@ def som(x) -> str:
 
 
 def vaqt_soz(minutlar: int) -> str:
-    """123 -> '2 soat 3 daqiqa'. 1 soniya ham 1 soatga aylanib ketmaydi."""
     minutlar = max(0, int(minutlar))
     s, d = divmod(minutlar, 60)
     if s and d:
@@ -172,7 +172,6 @@ def dt(sana: str, vaqt: str) -> datetime:
 
 
 def kun_hisobla(yozuv) -> dict:
-    """Bir kunlik yakuniy hisob: sof vaqt, jarima, daromad."""
     xodim = get_xodim(yozuv["telegram_id"])
     oylik = xodim["oylik"]
     keldi = dt(yozuv["sana"], yozuv["keldi"])
@@ -218,12 +217,12 @@ lokatsiya_kb = ReplyKeyboardMarkup(keyboard=[
 
 
 class Holat(StatesGroup):
-    lokatsiya = State()        # data: amal = boshlash / yakunlash
+    lokatsiya = State()        
     yangi_id = State()
     yangi_ism = State()
     yangi_oylik = State()
-    oylik_tahrir = State()     # data: tg_id
-    soz_qiymat = State()       # data: kalit
+    oylik_tahrir = State()     
+    soz_qiymat = State()       
     soz_lokatsiya = State()
 
 
@@ -313,7 +312,7 @@ async def lok_qabul(message: Message, state: FSMContext):
                 f"✅ Ish boshlandi. Vaqt: {vaqt.strftime('%H:%M')}\nYaxshi ish kuni tilaymiz!",
                 reply_markup=xodim_kb,
             )
-    else:  # yakunlash
+    else:  
         y = bugungi_yozuv(message.from_user.id)
         with db() as c:
             c.execute(
@@ -396,7 +395,6 @@ async def qoshimcha(message: Message):
             "Qo'shimcha ish — asosiy ish yakunlangandan keyin boshlanadi.\n"
             "Avval 🔴 Ishni yakunlash tugmasini bosing, keyin qo'shimcha ishni boshlang."
         )
-    # qo'shimcha ish boshlanishi = ketdi vaqti; tugashi = qayta bosilganda
     with db() as c:
         boshlandi = dt(bugun(), y["ketdi"]) + timedelta(minutes=y["qoshimcha_min"])
         qo_min = max(0, int((now() - boshlandi).total_seconds() // 60))
@@ -636,217 +634,3 @@ async def admin_xodimlar(message: Message):
                 "SELECT COALESCE(SUM(daromad),0) j FROM davomat "
                 "WHERE telegram_id=? AND tolangan=0", (r["telegram_id"],)
             ).fetchone()["j"]
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✏️ Oylik", callback_data=f"oylik:{r['telegram_id']}"),
-            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"del:{r['telegram_id']}"),
-        ]])
-        await message.answer(
-            f"👤 <b>{r['ism']}</b> (ID: <code>{r['telegram_id']}</code>)\n"
-            f"Oylik: {som(r['oylik'])} | Kun: {som(kun_narxi(r['oylik']))} | "
-            f"Daqiqa: {som(minut_narxi(r['oylik']))}\n"
-            f"To'lanmagan balans: <b>{som(balans)}</b>",
-            reply_markup=kb,
-        )
-
-
-@dp.callback_query(F.data.startswith("del:"))
-async def xodim_del(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Ruxsat yo'q", show_alert=True)
-    with db() as c:
-        c.execute("DELETE FROM xodimlar WHERE telegram_id=?",
-                  (int(call.data.split(":")[1]),))
-    await call.message.edit_text("🗑 Xodim o'chirildi (davomat tarixi saqlanadi).")
-
-
-@dp.callback_query(F.data.startswith("oylik:"))
-async def oylik_tahrir(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Ruxsat yo'q", show_alert=True)
-    await state.set_state(Holat.oylik_tahrir)
-    await state.update_data(tg_id=int(call.data.split(":")[1]))
-    await call.message.answer("Yangi oylikni yozing (masalan: 4500000):")
-    await call.answer()
-
-
-@dp.message(Holat.oylik_tahrir, faqat_admin)
-async def oylik_saqla(message: Message, state: FSMContext):
-    raqam = message.text.strip().replace(" ", "")
-    if not raqam.isdigit():
-        return await message.answer("Faqat raqam yozing.")
-    data = await state.get_data()
-    await state.clear()
-    with db() as c:
-        c.execute("UPDATE xodimlar SET oylik=? WHERE telegram_id=?",
-                  (int(raqam), data["tg_id"]))
-    await message.answer(f"✅ Oylik yangilandi: {som(int(raqam))}", reply_markup=admin_kb)
-
-
-# ==================== ADMIN: XODIM QO'SHISH ====================
-@dp.message(F.text == "➕ Xodim qo'shish", faqat_admin)
-async def qoshish_boshla(message: Message, state: FSMContext):
-    await state.set_state(Holat.yangi_id)
-    await message.answer(
-        "Xodimning Telegram ID raqamini yuboring.\n"
-        "(Xodim botga /start bossa, bot unga ID sini ko'rsatadi.)"
-    )
-
-
-@dp.message(Holat.yangi_id, faqat_admin)
-async def qoshish_id(message: Message, state: FSMContext):
-    if not message.text.strip().isdigit():
-        return await message.answer("ID faqat raqam bo'ladi. Qayta yuboring:")
-    await state.update_data(tg_id=int(message.text.strip()))
-    await state.set_state(Holat.yangi_ism)
-    await message.answer("Ism-familiyasini yozing:")
-
-
-@dp.message(Holat.yangi_ism, faqat_admin)
-async def qoshish_ism(message: Message, state: FSMContext):
-    await state.update_data(ism=message.text.strip())
-    await state.set_state(Holat.yangi_oylik)
-    await message.answer("Oylik maoshini yozing (masalan: 4000000):")
-
-
-@dp.message(Holat.yangi_oylik, faqat_admin)
-async def qoshish_oylik(message: Message, state: FSMContext):
-    raqam = message.text.strip().replace(" ", "")
-    if not raqam.isdigit():
-        return await message.answer("Faqat raqam yozing, masalan: 4000000")
-    data = await state.get_data()
-    await state.clear()
-    oylik = int(raqam)
-    with db() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO xodimlar (telegram_id, ism, oylik, qoshilgan) "
-            "VALUES (?,?,?,?)", (data["tg_id"], data["ism"], oylik, bugun()),
-        )
-    await message.answer(
-        f"🔔 <b>Yangi xodim qo'shildi:</b> {data['ism']}\n"
-        f"Oylik: {som(oylik)} | 1 daqiqa kechikish: {som(minut_narxi(oylik))} | "
-        f"1 kun kelmaslik: {som(kun_narxi(oylik))}",
-        reply_markup=admin_kb,
-    )
-    try:
-        await bot.send_message(data["tg_id"], "Siz tizimga qo'shildingiz! /start ni bosing.")
-    except Exception:
-        pass
-
-
-# ==================== ADMIN: SOZLAMALAR ====================
-@dp.message(F.text == "⚙️ Sozlamalar", faqat_admin)
-async def sozlamalar(message: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"🕘 Ish boshlanishi: {sozlama('ish_boshlanish')}",
-            callback_data="soz:ish_boshlanish")],
-        [InlineKeyboardButton(
-            text=f"🕕 Ish tugashi: {sozlama('ish_tugash')}",
-            callback_data="soz:ish_tugash")],
-        [InlineKeyboardButton(
-            text=f"🥪 Obed limiti: {sozlama('obed_limit')} daq",
-            callback_data="soz:obed_limit")],
-        [InlineKeyboardButton(
-            text=f"📏 Radius: {sozlama('radius')} m",
-            callback_data="soz:radius")],
-        [InlineKeyboardButton(
-            text="📍 Ofis lokatsiyasini yangilash",
-            callback_data="soz:lokatsiya")],
-    ])
-    await message.answer("⚙️ <b>Sozlamalar</b> — o'zgartirish uchun bosing:", reply_markup=kb)
-
-
-@dp.callback_query(F.data.startswith("soz:"))
-async def soz_tanla(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Ruxsat yo'q", show_alert=True)
-    kalit = call.data.split(":")[1]
-    if kalit == "lokatsiya":
-        await state.set_state(Holat.soz_lokatsiya)
-        await call.message.answer("Ofisning yangi lokatsiyasini yuboring (skrepka 📎 → Joylashuv).")
-    else:
-        await state.set_state(Holat.soz_qiymat)
-        await state.update_data(kalit=kalit)
-        namuna = {"ish_boshlanish": "09:00", "ish_tugash": "18:00",
-                  "obed_limit": "60", "radius": "150"}[kalit]
-        await call.message.answer(f"Yangi qiymatni yozing (masalan: {namuna}):")
-    await call.answer()
-
-
-@dp.message(Holat.soz_qiymat, faqat_admin)
-async def soz_saqla(message: Message, state: FSMContext):
-    data = await state.get_data()
-    kalit, qiymat = data["kalit"], message.text.strip()
-    if kalit in ("ish_boshlanish", "ish_tugash"):
-        try:
-            datetime.strptime(qiymat, "%H:%M")
-        except ValueError:
-            return await message.answer("Format noto'g'ri. Masalan: 09:00")
-    elif not qiymat.isdigit():
-        return await message.answer("Faqat raqam yozing.")
-    await state.clear()
-    sozlama_yoz(kalit, qiymat)
-    await message.answer("✅ Saqlandi.", reply_markup=admin_kb)
-
-
-@dp.message(Holat.soz_lokatsiya, F.location, faqat_admin)
-async def soz_lok(message: Message, state: FSMContext):
-    await state.clear()
-    sozlama_yoz("lat", message.location.latitude)
-    sozlama_yoz("lon", message.location.longitude)
-    await message.answer("✅ Ofis lokatsiyasi yangilandi.", reply_markup=admin_kb)
-
-
-# ==================== KUN YAKUNI (avtomatik, 23:00) ====================
-async def kun_yakuni():
-    if now().weekday() in DAM_KUNLARI:
-        return
-    with db() as c:
-        xodimlar = c.execute("SELECT * FROM xodimlar").fetchall()
-        kelmaganlar, yopilganlar = [], []
-        for x in xodimlar:
-            r = c.execute(
-                "SELECT * FROM davomat WHERE sana=? AND telegram_id=?",
-                (bugun(), x["telegram_id"]),
-            ).fetchone()
-            if not r:
-                jarima = int(round(kun_narxi(x["oylik"])))
-                c.execute(
-                    "INSERT OR IGNORE INTO davomat "
-                    "(sana, telegram_id, holat, jarima, daromad) VALUES (?,?,?,?,0)",
-                    (bugun(), x["telegram_id"], "kelmadi", jarima),
-                )
-                kelmaganlar.append(f"{x['ism']} — kun narxi {som(jarima)} hisoblanmadi")
-            elif not r["ketdi"]:
-                # ishni yakunlashni unutgan — ish tugash vaqtida yopamiz
-                c.execute(
-                    "UPDATE davomat SET ketdi=?, holat='ketdi' WHERE id=?",
-                    (sozlama("ish_tugash"), r["id"]),
-                )
-                r2 = c.execute("SELECT * FROM davomat WHERE id=?", (r["id"],)).fetchone()
-                h = kun_hisobla(r2)
-                c.execute(
-                    "UPDATE davomat SET jarima=?, daromad=? WHERE id=?",
-                    (h["jarima"], h["daromad"], r["id"]),
-                )
-                yopilganlar.append(x["ism"])
-    matn = []
-    if kelmaganlar:
-        matn.append("❌ <b>Bugun kelmaganlar:</b>\n" +
-                    "\n".join(f"  • {s}" for s in kelmaganlar))
-    if yopilganlar:
-        matn.append("ℹ️ Ishni yakunlashni unutganlar (avtomatik yopildi): " +
-                    ", ".join(yopilganlar))
-    if matn:
-        await bot.send_message(ADMIN_ID, "\n\n".join(matn))
-
-
-async def main():
-    init_db()
-    scheduler.add_job(kun_yakuni, "cron", hour=23, minute=0)
-    scheduler.start()
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
