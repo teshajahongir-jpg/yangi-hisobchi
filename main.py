@@ -1,636 +1,497 @@
-# -*- coding: utf-8 -*-
-"""
-Xodimlar keldi-ketdi nazorati boti — to'liq versiya
-Xodim:  Ishni boshlash/yakunlash (lokatsiya bilan), Obed, Qo'shimcha ish, o'z hisoboti
-Admin:  jonli panel (kim ishda/obedda/ketgan/kelmagan), xodimlar boshqaruvi,
-        kunlik/oylik hisobot, Excel eksport (buxgalteriya), hisobni nollash, sozlamalar
-Kutubxonalar: pip install aiogram apscheduler openpyxl aiohttp pytz
-"""
-
 import os
-import sqlite3
+import math
+import logging
 import asyncio
-from math import radians, cos, sin, asin, sqrt
-from datetime import datetime, timedelta
-import pytz
-from aiohttp import web
+from datetime import datetime, time
+import sqlite3
+import pandas as pd
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import (
-    Message, CallbackQuery, FSInputFile,
-    KeyboardButton, ReplyKeyboardMarkup,
-    InlineKeyboardButton, InlineKeyboardMarkup,
-)
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ==================== SOZLAMALAR ====================
-BOT_TOKEN = "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk"
-# 💡 DIQQAT: Admin_ID faqat shaxsiy akkaunt ID raqami bo'lishi kerak!
-ADMIN_ID = 8252424738  
+from fastapi import FastAPI
+import uvicorn
 
-ISH_KUNLARI = 26            # oyda nechta ish kuni
-DAM_KUNLARI = [6]           # 6 = yakshanba
-TZ = pytz.timezone("Asia/Tashkent")
-DB = "davomat.db"
+# 1. TIZIM SOZLAMALARI (CONFIG)
+BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # Bu yerga bot tokenini qo'ying
+ADMIN_ID = 123456789  # Jahongir aka, bu yerga o'zingizning shaxsiy Telegram ID-angizni qo'ying
 
-STANDART_SOZLAMALAR = {
-    "ish_boshlanish": "09:00",
-    "ish_tugash": "18:00",
-    "obed_limit": "60",       # daqiqa
-    "radius": "150",          # metr
-    "lat": "39.745430",
-    "lon": "64.439307",
-}
-# ====================================================
+# Ofis koordinatalari (Geofence) va ruxsat etilgan radius (metrda)
+OFFICE_LAT = 39.7747
+OFFICE_LON = 64.4286
+ALLOWED_RADIUS_METERS = 50.0
 
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-dp = Dispatcher(storage=MemoryStorage())
-scheduler = AsyncIOScheduler(timezone=TZ)
+# Ish vaqti standartlari
+WORK_START_TIME = time(9, 0)  # 09:00
+OBED_LIMIT_MINUTES = 60  # 1 soat obed
 
+# Loglarni sozlash
+logging.basicConfig(level=logging.INFO)
 
-# ==================== BAZA ====================
-def db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
-
+# 2. MA'LUMOTLAR BAZASI (SQLITE) OPERATSIYALARI
+DB_FILE = "attendance_system.db"
 
 def init_db():
-    with db() as c:
-        c.execute("""CREATE TABLE IF NOT EXISTS xodimlar (
-            telegram_id INTEGER PRIMARY KEY,
-            ism TEXT NOT NULL,
-            oylik INTEGER NOT NULL,
-            qoshilgan TEXT
-        )""")
-        c.execute("""CREATE TABLE IF NOT EXISTS davomat (
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Xodimlar jadvali
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS employees (
+            tg_id INTEGER PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            monthly_salary REAL NOT NULL,
+            daily_rate REAL NOT NULL,
+            minute_rate REAL NOT NULL,
+            status TEXT DEFAULT 'inactive'
+        )
+    ''')
+    
+    # Davomat va kunlik hisobotlar jadvali
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sana TEXT NOT NULL,
-            telegram_id INTEGER NOT NULL,
-            keldi TEXT,
-            ketdi TEXT,
-            obed_chiqdi TEXT,
-            obed_min INTEGER DEFAULT 0,
-            qoshimcha_min INTEGER DEFAULT 0,
-            kechikish_min INTEGER DEFAULT 0,
-            jarima INTEGER DEFAULT 0,
-            daromad INTEGER DEFAULT 0,
-            holat TEXT DEFAULT 'ishda',
-            tolangan INTEGER DEFAULT 0,
-            UNIQUE(sana, telegram_id)
-        )""")
-        c.execute("""CREATE TABLE IF NOT EXISTS sozlamalar (
-            kalit TEXT PRIMARY KEY, qiymat TEXT
-        )""")
-        for k, v in STANDART_SOZLAMALAR.items():
-            c.execute(
-                "INSERT OR IGNORE INTO sozlamalar (kalit, qiymat) VALUES (?,?)", (k, v)
-            )
+            tg_id INTEGER,
+            date TEXT,
+            arrival_time TEXT,
+            departure_time TEXT,
+            lunch_start TEXT,
+            lunch_end TEXT,
+            late_minutes INTEGER DEFAULT 0,
+            lunch_over_minutes INTEGER DEFAULT 0,
+            earned_today REAL DEFAULT 0,
+            status TEXT,
+            FOREIGN KEY(tg_id) REFERENCES employees(tg_id)
+        )
+    ''')
+    
+    # Dam olish kunlari jadvali (Admin o'zgartira oladi)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS off_days (
+            day_name TEXT PRIMARY KEY,
+            is_off INTEGER DEFAULT 0
+        )
+    ''')
+    
+    # Standart dam olish kunini (masalan Yakshanba) kiritish
+    days = ['Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba', 'Yakshanba']
+    for day in days:
+        is_off_val = 1 if day == 'Yakshanba' else 0
+        cursor.execute("INSERT OR IGNORE INTO off_days (day_name, is_off) VALUES (?, ?)", (day, is_off_val))
+        
+    conn.commit()
+    conn.close()
 
 init_db()
 
-def sozlama(kalit: str) -> str:
-    with db() as c:
-        return c.execute(
-            "SELECT qiymat FROM sozlamalar WHERE kalit=?", (kalit,)
-        ).fetchone()["qiymat"]
+# Haversine formulasi — Lokatsiyalar orasidagi masofani aniq hisoblash (metrda)
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371000  # Yer radiusi metrlarda
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
+# 3. TELEGRAM BOT (AIOGRAM 3.X) ISHLASHI
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
 
-def sozlama_yoz(kalit: str, qiymat: str):
-    with db() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO sozlamalar (kalit, qiymat) VALUES (?,?)",
-            (kalit, str(qiymat)),
+# FSM Davlatlari (Xodim qo'shish uchun)
+class EmployeeForm(StatesGroup):
+    tg_id = State()
+    full_name = State()
+    salary = State()
+
+# Klaviaturalar (Keyboards)
+def get_admin_keyboard():
+    kb = [
+        [KeyboardButton(text="👥 Xodimlar Ro'yxati"), KeyboardButton(text="➕ Xodim Qo'shish")],
+        [KeyboardButton(text="📊 Excel Hisobot Yuklash"), KeyboardButton(text="⚙ Dam olish kunlari")],
+        [KeyboardButton(text="🔄 Tizimni Yangilash")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+def get_employee_keyboard(status):
+    if status == 'inactive':
+        kb = [[KeyboardButton(text="🟢 Ishni boshlash", request_location=True)]]
+    elif status == 'working':
+        kb = [
+            [KeyboardButton(text="🍽 Obedga chiqish"), KeyboardButton(text="🔴 Ishni yakunlash", request_location=True)]
+        ]
+    elif status == 'lunch':
+        kb = [[KeyboardButton(text="↩ Obeddan qaytish", request_location=True)]]
+    else:
+        kb = [[KeyboardButton(text="📴 Bugun sizga dam yoki ish yakunlangan")]]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+# --- ADMIN HANDLERS ---
+@dp.message(Command("start"), F.from_user.id == ADMIN_ID)
+async def admin_start(message: types.Message):
+    await message.answer("Xush kelibsiz, Jahongir aka! Boshqaruv paneliga xush kelibsiz.", reply_markup=get_admin_keyboard())
+
+@dp.message(F.text == "➕ Xodim Qo'shish", F.from_user.id == ADMIN_ID)
+async def add_employee_start(message: types.Message, state: FSMContext):
+    await message.answer("Xodimning Telegram ID raqamini kiriting:")
+    await state.set_state(EmployeeForm.tg_id)
+
+@dp.message(EmployeeForm.tg_id, F.from_user.id == ADMIN_ID)
+async def add_employee_id(message: types.Message, state: FSMContext):
+    try:
+        tg_id = int(message.text)
+        await state.update_data(tg_id=tg_id)
+        await message.answer("Xodimning F.I.Sh (Ismi va Familiyasi)ni kiriting:")
+        await state.set_state(EmployeeForm.full_name)
+    except ValueError:
+        await message.answer("Iltimos, faqat raqamlardan iborat ID kiriting:")
+
+@dp.message(EmployeeForm.full_name, F.from_user.id == ADMIN_ID)
+async def add_employee_name(message: types.Message, state: FSMContext):
+    await state.update_data(full_name=message.text)
+    await message.answer("Xodimning oylik maoshini kiriting (so'mda, masalan: 5000000):")
+    await state.set_state(EmployeeForm.salary)
+
+@dp.message(EmployeeForm.salary, F.from_user.id == ADMIN_ID)
+async def add_employee_salary(message: types.Message, state: FSMContext):
+    try:
+        salary = float(message.text)
+        data = await state.get_data()
+        
+        # Oylik, kunlik va daqiqalik stavkalarni hisoblash (26 ish kuniga bo'lingan holda)
+        daily_rate = salary / 26
+        minute_rate = daily_rate / 540  # 9 soatlik ish kuni = 540 daqiqa
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO employees (tg_id, full_name, monthly_salary, daily_rate, minute_rate) VALUES (?, ?, ?, ?, ?)",
+            (data['tg_id'], data['full_name'], salary, daily_rate, minute_rate)
         )
-
-
-def now():
-    return datetime.now(TZ)
-
-
-def bugun():
-    return now().strftime("%Y-%m-%d")
-
-
-def get_xodim(tg_id: int):
-    with db() as c:
-        return c.execute(
-            "SELECT * FROM xodimlar WHERE telegram_id=?", (tg_id,)
-        ).fetchone()
-
-
-def bugungi_yozuv(tg_id: int):
-    with db() as c:
-        return c.execute(
-            "SELECT * FROM davomat WHERE sana=? AND telegram_id=?", (bugun(), tg_id)
-        ).fetchone()
-
-
-# ==================== HISOB-KITOB ====================
-def ish_minutlari() -> int:
-    b = datetime.strptime(sozlama("ish_boshlanish"), "%H:%M")
-    t = datetime.strptime(sozlama("ish_tugash"), "%H:%M")
-    return (t - b).seconds // 60
-
-
-def kun_narxi(oylik: int) -> float:
-    return oylik / ISH_KUNLARI
-
-
-def minut_narxi(oylik: int) -> float:
-    return kun_narxi(oylik) / ish_minutlari()
-
-
-def masofa_m(lat1, lon1) -> float:
-    lat2, lon2 = float(sozlama("lat")), float(sozlama("lon"))
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    a = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
-    return 6371000 * 2 * asin(sqrt(a))
-
-
-def som(x) -> str:
-    return f"{int(round(x)):,}".replace(",", " ") + " so'm"
-
-
-def vaqt_soz(minutlar: int) -> str:
-    minutlar = max(0, int(minutlar))
-    s, d = divmod(minutlar, 60)
-    if s and d:
-        return f"{s} soat {d} daqiqa"
-    if s:
-        return f"{s} soat"
-    return f"{d} daqiqa"
-
-
-def dt(sana: str, vaqt: str) -> datetime:
-    return datetime.strptime(f"{sana} {vaqt}", "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
-
-
-def kun_hisobla(yozuv) -> dict:
-    xodim = get_xodim(yozuv["telegram_id"])
-    oylik = xodim["oylik"]
-    keldi = dt(yozuv["sana"], yozuv["keldi"])
-    ketdi = dt(yozuv["sana"], yozuv["ketdi"])
-
-    jami_min = int((ketdi - keldi).total_seconds() // 60)
-    sof_min = max(0, jami_min - yozuv["obed_min"])
-
-    obed_limit = int(sozlama("obed_limit"))
-    obed_oshdi = max(0, yozuv["obed_min"] - obed_limit)
-
-    jarima = int(round(
-        (yozuv["kechikish_min"] + obed_oshdi) * minut_narxi(oylik)
-    ))
-    bonus = int(round(yozuv["qoshimcha_min"] * minut_narxi(oylik)))
-    daromad = max(0, int(round(kun_narxi(oylik))) - jarima + bonus)
-    return {
-        "sof_min": sof_min, "obed_oshdi": obed_oshdi,
-        "jarima": jarima, "bonus": bonus, "daromad": daromad,
-    }
-
-
-# ==================== KLAVIATURALAR ====================
-xodim_kb = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="🟢 Ishni boshlash")],
-    [KeyboardButton(text="🥪 Obedga chiqish"), KeyboardButton(text="🔙 Obeddan qaytish")],
-    [KeyboardButton(text="⏰ Qo'shimcha ishlash")],
-    [KeyboardButton(text="🔴 Ishni yakunlash")],
-    [KeyboardButton(text="📊 Mening hisobotim")],
-], resize_keyboard=True)
-
-admin_kb = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="📊 Bugun"), KeyboardButton(text="📅 Hisobot")],
-    [KeyboardButton(text="👥 Xodimlar"), KeyboardButton(text="➕ Xodim qo'shish")],
-    [KeyboardButton(text="📥 Excel (Buxgalteriya)"), KeyboardButton(text="💰 Hisobni nollash")],
-    [KeyboardButton(text="⚙️ Sozlamalar")],
-], resize_keyboard=True)
-
-lokatsiya_kb = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="📍 Lokatsiyani yuborish", request_location=True)],
-    [KeyboardButton(text="◀️ Orqaga")],
-], resize_keyboard=True)
-
-
-class Holat(StatesGroup):
-    lokatsiya = State()        
-    yangi_id = State()
-    yangi_ism = State()
-    yangi_oylik = State()
-    oylik_tahrir = State()     
-    soz_qiymat = State()       
-    soz_lokatsiya = State()
-
-
-# ==================== XODIM: START ====================
-@dp.message(CommandStart())
-async def cmd_start(message: Message):
-    if message.from_user.id == ADMIN_ID:
-        return await message.answer("👨‍💼 <b>Admin panel</b>", reply_markup=admin_kb)
-    if get_xodim(message.from_user.id):
-        return await message.answer(
-            "Assalomu alaykum! Tugmalardan foydalaning 👇", reply_markup=xodim_kb
-        )
-    await message.answer(
-        "Siz hali ro'yxatda yo'qsiz.\n"
-        f"Sizning ID raqamingiz: <code>{message.from_user.id}</code>\n"
-        "Shu raqamni rahbaringizga bering."
-    )
-
-
-# ==================== XODIM: ISH BOSHLASH / YAKUNLASH ====================
-@dp.message(F.text.in_({"🟢 Ishni boshlash", "🔴 Ishni yakunlash"}))
-async def ish_amal(message: Message, state: FSMContext):
-    if not get_xodim(message.from_user.id):
-        return await message.answer("Avval ro'yxatdan o'ting: /start")
-    amal = "boshlash" if "boshlash" in message.text else "yakunlash"
-    y = bugungi_yozuv(message.from_user.id)
-    if amal == "boshlash" and y:
-        return await message.answer("Bugun ish allaqachon boshlangan.")
-    if amal == "yakunlash":
-        if not y or not y["keldi"]:
-            return await message.answer("Avval ishni boshlang.")
-        if y["ketdi"]:
-            return await message.answer("Bugun ish allaqachon yakunlangan.")
-        if y["holat"] == "obedda":
-            return await message.answer("Avval 🔙 Obeddan qaytish tugmasini bosing.")
-    await state.set_state(Holat.lokatsiya)
-    await state.update_data(amal=amal)
-    await message.answer(
-        "Ishxonada ekaningizni tasdiqlang — lokatsiya yuboring:",
-        reply_markup=lokatsiya_kb,
-    )
-
-
-@dp.message(Holat.lokatsiya, F.text == "◀️ Orqaga")
-async def lok_bekor(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Bekor qilindi.", reply_markup=xodim_kb)
-
-
-@dp.message(Holat.lokatsiya, F.location)
-async def lok_qabul(message: Message, state: FSMContext):
-    data = await state.get_data()
-    await state.clear()
-    xodim = get_xodim(message.from_user.id)
-    m = masofa_m(message.location.latitude, message.location.longitude)
-    radius = int(sozlama("radius"))
-    if m > radius:
-        return await message.answer(
-            f"❌ Siz ishxonadan <b>{int(m)} m</b> uzoqdasiz "
-            f"(ruxsat: {radius} m).", reply_markup=xodim_kb,
-        )
-
-    vaqt = now()
-    if data["amal"] == "boshlash":
-        bosh = dt(bugun(), sozlama("ish_boshlanish"))
-        kech = max(0, int((vaqt - bosh).total_seconds() // 60))
-        with db() as c:
-            c.execute(
-                "INSERT INTO davomat (sana, telegram_id, keldi, kechikish_min, holat) "
-                "VALUES (?,?,?,?, 'ishda')",
-                (bugun(), message.from_user.id, vaqt.strftime("%H:%M"), kech),
-            )
-        if kech:
-            jarima = int(round(kech * minut_narxi(xodim["oylik"])))
-            await message.answer(
-                f"✅ Ish boshlandi. Vaqt: {vaqt.strftime('%H:%M')}\n"
-                f"⚠️ Kechikish: <b>{vaqt_soz(kech)}</b> | Jarima: <b>{som(jarima)}</b>",
-                reply_markup=xodim_kb,
-            )
-            await bot.send_message(
-                ADMIN_ID,
-                f"⏰ <b>{xodim['ism']}</b> {vaqt_soz(kech)} kechikdi "
-                f"({vaqt.strftime('%H:%M')}). Jarima: {som(jarima)}",
-            )
-        else:
-            await message.answer(
-                f"✅ Ish boshlandi. Vaqt: {vaqt.strftime('%H:%M')}\nYaxshi ish kuni tilaymiz!",
-                reply_markup=xodim_kb,
-            )
-    else:  
-        y = bugungi_yozuv(message.from_user.id)
-        with db() as c:
-            c.execute(
-                "UPDATE davomat SET ketdi=?, holat='ketdi' WHERE id=?",
-                (vaqt.strftime("%H:%M"), y["id"]),
-            )
-            y = c.execute("SELECT * FROM davomat WHERE id=?", (y["id"],)).fetchone()
-            h = kun_hisobla(y)
-            c.execute(
-                "UPDATE davomat SET jarima=?, daromad=? WHERE id=?",
-                (h["jarima"], h["daromad"], y["id"]),
-            )
-        matn = (
-            f"🔴 Ish yakunlandi. Vaqt: {vaqt.strftime('%H:%M')}\n"
-            f"Sof ish vaqti: <b>{vaqt_soz(h['sof_min'])}</b>\n"
-        )
-        if y["obed_min"]:
-            matn += f"Obed: {vaqt_soz(y['obed_min'])}"
-            if h["obed_oshdi"]:
-                matn += f" (limitdan {h['obed_oshdi']} daq oshdi)"
-            matn += "\n"
-        if y["qoshimcha_min"]:
-            matn += f"Qo'shimcha ish: {vaqt_soz(y['qoshimcha_min'])} (+{som(h['bonus'])})\n"
-        if h["jarima"]:
-            matn += f"Jarima: {som(h['jarima'])}\n"
-        matn += f"Bugungi daromad: <b>{som(h['daromad'])}</b>"
-        await message.answer(matn, reply_markup=xodim_kb)
-
-
-@dp.message(Holat.lokatsiya)
-async def lok_notogri(message: Message):
-    await message.answer("Iltimos, 📍 tugma orqali lokatsiya yuboring.")
-
-
-# ==================== XODIM: OBED ====================
-@dp.message(F.text == "🥪 Obedga chiqish")
-async def obed_chiqish(message: Message):
-    y = bugungi_yozuv(message.from_user.id)
-    if not y or y["ketdi"]:
-        return await message.answer("Hozir ish vaqtida emassiz.")
-    if y["holat"] == "obedda":
-        return await message.answer("Siz allaqachon obeddasiz.")
-    if y["obed_min"] > 0:
-        return await message.answer("Bugun obedga chiqib bo'lgansiz.")
-    with db() as c:
-        c.execute(
-            "UPDATE davomat SET obed_chiqdi=?, holat='obedda' WHERE id=?",
-            (now().strftime("%H:%M"), y["id"]),
-        )
-    await message.answer(
-        f"🥪 Yoqimli ishtaha! Obed limiti: {sozlama('obed_limit')} daqiqa."
-    )
-
-
-@dp.message(F.text == "🔙 Obeddan qaytish")
-async def obed_qaytish(message: Message):
-    y = bugungi_yozuv(message.from_user.id)
-    if not y or y["holat"] != "obedda":
-        return await message.answer("Siz obedga chiqmagansiz.")
-    chiqdi = dt(bugun(), y["obed_chiqdi"])
-    obed_min = max(1, int((now() - chiqdi).total_seconds() // 60))
-    with db() as c:
-        c.execute(
-            "UPDATE davomat SET obed_min=?, holat='ishda' WHERE id=?",
-            (obed_min, y["id"]),
-        )
-    limit = int(sozlama("obed_limit"))
-    matn = f"🔙 Qaytdingiz. Obed: <b>{vaqt_soz(obed_min)}</b>"
-    if obed_min > limit:
-        matn += f"\n⚠️ Limitdan {obed_min - limit} daqiqa oshdi — jarima yoziladi."
-    await message.answer(matn)
-
-
-# ==================== XODIM: QO'SHIMCHA ISH ====================
-@dp.message(F.text == "⏰ Qo'shimcha ishlash")
-async def qoshimcha(message: Message):
-    y = bugungi_yozuv(message.from_user.id)
-    if not y or not y["ketdi"]:
-        return await message.answer(
-            "Qo'shimcha ish — asosiy ish yakunlangandan keyin boshlanadi.\n"
-            "Avval 🔴 Ishni yakunlash tugmasini bosing, keyin qo'shimcha ishni boshlang."
-        )
-    with db() as c:
-        boshlandi = dt(bugun(), y["ketdi"]) + timedelta(minutes=y["qoshimcha_min"])
-        qo_min = max(0, int((now() - boshlandi).total_seconds() // 60))
-        if qo_min == 0:
-            return await message.answer(
-                "⏰ Qo'shimcha ish boshlandi. Tugatganingizda shu tugmani yana bosing."
-            )
-        jami = y["qoshimcha_min"] + qo_min
-        c.execute("UPDATE davomat SET qoshimcha_min=? WHERE id=?", (jami, y["id"]))
-        y2 = c.execute("SELECT * FROM davomat WHERE id=?", (y["id"],)).fetchone()
-        h = kun_hisobla(y2)
-        c.execute(
-            "UPDATE davomat SET jarima=?, daromad=? WHERE id=?",
-            (h["jarima"], h["daromad"], y["id"]),
-        )
-    await message.answer(
-        f"⏰ Qo'shimcha ish: <b>{vaqt_soz(jami)}</b> | Bonus: <b>{som(h['bonus'])}</b>\n"
-        f"Bugungi daromad: <b>{som(h['daromad'])}</b>"
-    )
-
-
-# ==================== XODIM: O'Z HISOBOTI ====================
-@dp.message(F.text == "📊 Mening hisobotim")
-async def mening(message: Message):
-    xodim = get_xodim(message.from_user.id)
-    if not xodim:
-        return await message.answer("Avval ro'yxatdan o'ting: /start")
-    with db() as c:
-        rows = c.execute(
-            "SELECT * FROM davomat WHERE telegram_id=? AND tolangan=0",
-            (message.from_user.id,),
-        ).fetchall()
-    kelgan = sum(1 for r in rows if r["holat"] != "kelmadi")
-    kelmagan = sum(1 for r in rows if r["holat"] == "kelmadi")
-    kechikish = sum(r["kechikish_min"] for r in rows)
-    qoshimcha_m = sum(r["qoshimcha_min"] for r in rows)
-    jarima = sum(r["jarima"] for r in rows)
-    balans = sum(r["daromad"] for r in rows)
-    await message.answer(
-        f"📊 <b>{xodim['ism']}</b> — joriy hisob:\n\n"
-        f"Kelgan kunlar: {kelgan}\n"
-        f"Kelmagan kunlar: {kelmagan}\n"
-        f"Jami kechikish: {vaqt_soz(kechikish)}\n"
-        f"Qo'shimcha ish: {vaqt_soz(qoshimcha_m)}\n"
-        f"Jami jarima: {som(jarima)}\n"
-        f"💰 To'lanadigan balans: <b>{som(balans)}</b>"
-    )
-
-
-# ==================== ADMIN: BUGUN (JONLI PANEL) ====================
-def faqat_admin(message: Message) -> bool:
-    return message.from_user.id == ADMIN_ID
-
-
-@dp.message(F.text == "📊 Bugun", faqat_admin)
-async def admin_bugun(message: Message):
-    with db() as c:
-        xodimlar = c.execute("SELECT * FROM xodimlar ORDER BY ism").fetchall()
-        rows = {
-            r["telegram_id"]: r
-            for r in c.execute("SELECT * FROM davomat WHERE sana=?", (bugun(),)).fetchall()
-        }
-    if not xodimlar:
-        return await message.answer("Xodimlar ro'yxati bo'sh.")
-    ishda, obedda, ketgan, kelmagan = [], [], [], []
-    for x in xodimlar:
-        r = rows.get(x["telegram_id"])
-        if not r:
-            kelmagan.append(x["ism"])
-        elif r["holat"] == "kelmadi":
-            kelmagan.append(f"{x['ism']} (jarima yozilgan)")
-        elif r["holat"] == "obedda":
-            obedda.append(f"{x['ism']} — {r['obed_chiqdi']} dan beri")
-        elif r["holat"] == "ketdi":
-            h = kun_hisobla(r)
-            ketgan.append(
-                f"{x['ism']} — {r['keldi']}–{r['ketdi']}, sof {vaqt_soz(h['sof_min'])}"
-            )
-        else:
-            s = f"{x['ism']} — {r['keldi']} da keldi"
-            if r["kechikish_min"]:
-                s += f" (⚠️ {vaqt_soz(r['kechikish_min'])} kechikdi)"
-            ishda.append(s)
-    matn = [f"📊 <b>Bugun — {now().strftime('%d.%m.%Y, %H:%M')}</b>\n"]
-    matn.append(f"🟢 Ishda ({len(ishda)}):")
-    matn += [f"  • {s}" for s in ishda] or ["  —"]
-    matn.append(f"\n🥪 Obedda ({len(obedda)}):")
-    matn += [f"  • {s}" for s in obedda] or ["  —"]
-    matn.append(f"\n🔴 Ishni tugatgan ({len(ketgan)}):")
-    matn += [f"  • {s}" for s in ketgan] or ["  —"]
-    matn.append(f"\n❌ Kelmagan ({len(kelmagan)}):")
-    matn += [f"  • {s}" for s in kelmagan] or ["  —"]
-    await message.answer("\n".join(matn))
-
-
-# ==================== ADMIN: HISOBOT ====================
-@dp.message(F.text == "📅 Hisobot", faqat_admin)
-async def admin_hisobot_menyu(message: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Bugun", callback_data="his:kun"),
-        InlineKeyboardButton(text="Shu oy", callback_data="his:oy"),
-        InlineKeyboardButton(text="To'lanmagan balans", callback_data="his:balans"),
-    ]])
-    await message.answer("Qaysi hisobot kerak?", reply_markup=kb)
-
-
-@dp.callback_query(F.data.startswith("his:"))
-async def admin_hisobot(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Ruxsat yo'q", show_alert=True)
-    tur = call.data.split(":")[1]
-    with db() as c:
-        xodimlar = c.execute("SELECT * FROM xodimlar ORDER BY ism").fetchall()
-        if tur == "kun":
-            rows = c.execute("SELECT * FROM davomat WHERE sana=?", (bugun(),)).fetchall()
-            sarlavha = f"📅 Bugungi hisobot ({now().strftime('%d.%m.%Y')})"
-        elif tur == "oy":
-            rows = c.execute(
-                "SELECT * FROM davomat WHERE sana LIKE ?", (now().strftime("%Y-%m") + "%",)
-            ).fetchall()
-            sarlavha = f"📅 {now().strftime('%m.%Y')} oyi hisoboti"
-        else:
-            rows = c.execute("SELECT * FROM davomat WHERE tolangan=0").fetchall()
-            sarlavha = "💰 To'lanmagan balanslar"
-    matn = [f"<b>{sarlavha}</b>\n"]
-    jami_balans = 0
-    for x in xodimlar:
-        xr = [r for r in rows if r["telegram_id"] == x["telegram_id"]]
-        if not xr:
-            continue
-        kelgan = sum(1 for r in xr if r["holat"] != "kelmadi")
-        kelmagan = sum(1 for r in xr if r["holat"] == "kelmadi")
-        kechikish = sum(r["kechikish_min"] for r in xr)
-        jarima = sum(r["jarima"] for r in xr)
-        balans = sum(r["daromad"] for r in xr)
-        jami_balans += balans
-        matn.append(
-            f"👤 <b>{x['ism']}</b>\n"
-            f"  Kelgan: {kelgan} | Kelmagan: {kelmagan} | "
-            f"Kechikish: {vaqt_soz(kechikish)}\n"
-            f"  Jarima: {som(jarima)} | Hisoblangan: <b>{som(balans)}</b>\n"
-        )
-    matn.append(f"\n<b>Jami: {som(jami_balans)}</b>")
-    await call.message.edit_text("\n".join(matn))
-
-
-# ==================== ADMIN: EXCEL ====================
-@dp.message(F.text == "📥 Excel (Buxgalteriya)", faqat_admin)
-async def admin_excel(message: Message):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-
-    oy = now().strftime("%Y-%m")
-    with db() as c:
-        xodimlar = c.execute("SELECT * FROM xodimlar ORDER BY ism").fetchall()
-        rows = c.execute(
-            "SELECT * FROM davomat WHERE sana LIKE ?", (oy + "%",)
-        ).fetchall()
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Oylik hisobot"
-    sarlavha = ["Xodim", "Kelgan kun", "Kelmagan kun", "Kechikish (daq)",
-                "Qo'shimcha (daq)", "Jarima (so'm)", "Hisoblangan (so'm)",
-                "To'lanmagan balans (so'm)"]
-    ws.append(sarlavha)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-    for x in xodimlar:
-        xr = [r for r in rows if r["telegram_id"] == x["telegram_id"]]
-        balans = sum(
-            r["daromad"] for r in xr if not r["tolangan"]
-        )
-        ws.append([
-            x["ism"],
-            sum(1 for r in xr if r["holat"] != "kelmadi"),
-            sum(1 for r in xr if r["holat"] == "kelmadi"),
-            sum(r["kechikish_min"] for r in xr),
-            sum(r["qoshimcha_min"] for r in xr),
-            sum(r["jarima"] for r in xr),
-            sum(r["daromad"] for r in xr),
-            balans,
-        ])
-    for col in "ABCDEFGH":
-        ws.column_dimensions[col].width = 20
-
-    fayl = f"hisobot_{oy}.xlsx"
-    wb.save(fayl)
-    await message.answer_document(
-        FSInputFile(fayl), caption=f"📥 {now().strftime('%m.%Y')} oyi hisoboti"
-    )
-    os.remove(fayl)
-
-
-# ==================== ADMIN: NOLLASH ====================
-@dp.message(F.text == "💰 Hisobni nollash", faqat_admin)
-async def nollash_sorov(message: Message):
-    with db() as c:
-        jami = c.execute(
-            "SELECT COALESCE(SUM(daromad),0) j FROM davomat WHERE tolangan=0"
-        ).fetchone()["j"]
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Ha, to'landi", callback_data="nol:ha"),
-        InlineKeyboardButton(text="❌ Bekor", callback_data="nol:yoq"),
-    ]])
-    await message.answer(
-        f"Jami to'lanmagan balans: <b>{som(jami)}</b>\n\n"
-        "Hammasi to'lab berildimi? Tasdiqlasangiz, barcha xodimlar balansi "
-        "0 ga tushadi (tarix o'chmaydi, «to'langan» deb belgilanadi).",
-        reply_markup=kb,
-    )
-
-
-@dp.callback_query(F.data.startswith("nol:"))
-async def nollash(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return await call.answer("Ruxsat yo'q", show_alert=True)
-    if call.data == "nol:yoq":
-        return await call.message.edit_text("Bekor qilindi.")
-    with db() as c:
-        c.execute("UPDATE davomat SET tolangan=1 WHERE tolangan=0")
-    await call.message.edit_text(
-        "✅ Barcha xodimlarning hisob-kitoblari 0 ga tushirildi."
-    )
-
-
-# ==================== ADMIN: XODIMLAR ====================
-@dp.message(F.text == "👥 Xodimlar", faqat_admin)
-async def admin_xodimlar(message: Message):
-    with db() as c:
-        rows = c.execute("SELECT * FROM xodimlar ORDER BY ism").fetchall()
+        conn.commit()
+        conn.close()
+        
+        await message.answer(f"✅ Xodim muvaffaqiyatli qo'shildi!\n👤 {data['full_name']}\n💰 Kunlik stavka: {daily_rate:.2f} so'm", reply_markup=get_admin_keyboard())
+        await state.clear()
+    except ValueError:
+        await message.answer("Iltimos, maoshni to'g'ri raqamda kiriting:")
+
+@dp.message(F.text == "👥 Xodimlar Ro'yxati", F.from_user.id == ADMIN_ID)
+async def list_employees(message: types.Message):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT tg_id, full_name, monthly_salary, status FROM employees")
+    rows = cursor.fetchall()
+    conn.close()
+    
     if not rows:
-        return await message.answer("Ro'yxat bo'sh. ➕ Xodim qo'shish tugmasini bosing.")
+        await message.answer("Hozircha hech qanday xodim qo'shilmagan.")
+        return
+        
+    text = "📋 **Xodimlar ro'yxati va joriy holati:**\n\n"
     for r in rows:
-        with db() as c:
-            balans = c.execute(
-                "SELECT COALESCE(SUM(daromad),0) j FROM davomat "
-                "WHERE telegram_id=? AND tolangan=0", (r["telegram_id"],)
-            ).fetchone()["j"]
+        text += f"🆔 {r[0]} | 👤 {r[1]} | 💰 {r[2]:,.0f} so'm | Holat: {r[3]}\n"
+    await message.answer(text)
+
+@dp.message(F.text == "⚙ Dam olish kunlari", F.from_user.id == ADMIN_ID)
+async def manage_off_days(message: types.Message):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT day_name, is_off FROM off_days")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    inline_kb = []
+    for day, is_off in rows:
+        status_str = "🟢 Dam olish kuni" if is_off == 1 else "🔴 Ish kuni"
+        inline_kb.append([InlineKeyboardButton(text=f"{day}: {status_str}", callback_data=f"toggle_{day}")])
+        
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=inline_kb)
+    await message.answer("Haftalik kunlar sozlamasi. O'zgartirmoqchi bo'lgan kuningizni bosing:", reply_markup=reply_markup)
+
+@dp.callback_query(F.data.startswith("toggle_"))
+async def toggle_day_callback(callback: types.CallbackQuery):
+    day_name = callback.data.split("_")[1]
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT is_off FROM off_days WHERE day_name = ?", (day_name,))
+    current = cursor.fetchone()[0]
+    new_val = 0 if current == 1 else 1
+    cursor.execute("UPDATE off_days SET is_off = ? WHERE day_name = ?", (new_val, day_name))
+    conn.commit()
+    
+    cursor.execute("SELECT day_name, is_off FROM off_days")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    inline_kb = []
+    for day, is_off in rows:
+        status_str = "🟢 Dam olish kuni" if is_off == 1 else "🔴 Ish kuni"
+        inline_kb.append([InlineKeyboardButton(text=f"{day}: {status_str}", callback_data=f"toggle_{day}")])
+        
+    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb))
+    await callback.answer(f"{day_name} holati o'zgartirildi!")
+
+@dp.message(F.text == "📊 Excel Hisobot Yuklash", F.from_user.id == ADMIN_ID)
+async def export_excel(message: types.Message):
+    conn = sqlite3.connect(DB_FILE)
+    
+    # 1-Varoq: Kunlik batafsil jadval
+    df_daily = pd.read_sql_query("SELECT * FROM attendance", conn)
+    
+    # 2-Varoq: Oylik yakuniy hisob-kitoblar
+    query_monthly = '''
+        SELECT 
+            e.full_name AS [Xodim F.I.Sh],
+            COUNT(CASE WHEN a.status = 'completed' THEN 1 END) AS [Kelgan kunlari],
+            SUM(a.late_minutes) AS [Jami kechikish (daqiqa)],
+            SUM(a.lunch_over_minutes) AS [Jami obeddan kechikish],
+            SUM(a.earned_today) AS [Jami hisoblangan maosh (so'm)]
+        FROM employees e
+        LEFT JOIN attendance a ON e.tg_id = a.tg_id
+        GROUP BY e.tg_id
+    '''
+    df_monthly = pd.read_sql_query(query_monthly, conn)
+    conn.close()
+    
+    file_path = "Hisobot_Sherin_Bakery.xlsx"
+    with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+        df_daily.to_excel(writer, sheet_name='Kunlik Batafsil', index=False)
+        df_monthly.to_excel(writer, sheet_name='Oylik Yakuniy Hisobot', index=False)
+        
+    file = types.FSInputFile(file_path)
+    await message.answer_document(file, caption="📋 Sherin Bakery uchun tayyorlangan 2 varoqli (Kunlik va Oylik) yakuniy Excel hisoboti.")
+    os.remove(file_path)
+
+# --- XODIM HANDLERS ---
+@dp.message(Command("start"), F.from_user.id != ADMIN_ID)
+async def employee_start(message: types.Message):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, full_name FROM employees WHERE tg_id = ?", (message.from_user.id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        await message.answer("❌ Kechirasiz, siz tizimga xodim sifatida kiritilmagansiz. Adminga murojaat qiling.")
+        return
+        
+    await message.answer(f"Salom {row[1]}! Tizimga xush kelibsiz. Quyidagi tugmalardan foydalaning.", reply_markup=get_employee_keyboard(row[0]))
+
+@dp.message(F.location)
+async def handle_location(message: types.Message):
+    # Geofence tekshiruvi
+    dist = calculate_distance(message.location.latitude, message.location.longitude, OFFICE_LAT, OFFICE_LON)
+    if dist > ALLOWED_RADIUS_METERS:
+        await message.answer(f"❌ Siz ofis hududida emassiz! (Masofa: {dist:.1f} metr). Ofisga kelib qaytadan urinib ko'ring.")
+        return
+        
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, daily_rate, minute_rate, full_name FROM employees WHERE tg_id = ?", (message.from_user.id,))
+    emp = cursor.fetchone()
+    
+    if not emp:
+        conn.close()
+        return
+        
+    status, daily_rate, minute_rate, full_name = emp
+    now_str = datetime.now().strftime("%H:%M:%S")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    
+    if status == 'inactive':
+        # ISHNI BOSHLASH
+        now_time = datetime.now().time()
+        late_minutes = 0
+        
+        # Kechikish mantiqi: 09:01 dan boshlab har bir daqiqa hisoblanadi
+        if now_time > WORK_START_TIME:
+            fmt = '%H:%M:%S'
+            d1 = datetime.strptime(now_str, fmt)
+            d2 = datetime.strptime("09:00:00", fmt)
+            late_minutes = int((d1 - d2).total_seconds() / 60)
+            
+        # Agar xodim kechikkan bo'lsa, o'sha kunlik stavkadan minus qilinadi (Jahongir aka sharti bo'yicha kunidan minus qilish)
+        earned_today = daily_rate - (late_minutes * minute_rate)
+        if earned_today < 0: 
+            earned_today = 0
+            
+        cursor.execute(
+            "INSERT INTO attendance (tg_id, date, arrival_time, late_minutes, earned_today, status) VALUES (?, ?, ?, ?, ?, 'working')",
+            (message.from_user.id, today_str, now_str, late_minutes, earned_today)
+        )
+        cursor.execute("UPDATE employees SET status = 'working' WHERE tg_id = ?", (message.from_user.id,))
+        conn.commit()
+        
+        await message.answer(f"✅ Ish muvaffaqiyatli boshlandi!\n⏰ Vaqt: {now_str}\n⚠️ Kechikish: {late_minutes} daqiqa.", reply_markup=get_employee_keyboard('working'))
+        # Adminga shaxsiy xabar
+        await bot.send_message(ADMIN_ID, f"🟢 Xodim **{full_name}** {now_str} da ishni boshladi.\nKechikish: {late_minutes} daqiqa.")
+        
+    elif status == 'working':
+        # ISHNI YAKUNLASH
+        cursor.execute("UPDATE attendance SET departure_time = ?, status = 'completed' WHERE tg_id = ? AND date = ?", (now_str, message.from_user.id, today_str))
+        cursor.execute("UPDATE employees SET status = 'inactive' WHERE tg_id = ?", (message.from_user.id,))
+        conn.commit()
+        
+        await message.answer(f"🔴 Ish kuningiz yakunlandi. Rahmat!\n⏰ Vaqt: {now_str}", reply_markup=get_employee_keyboard('inactive'))
+        await bot.send_message(ADMIN_ID, f"🔴 Xodim **{full_name}** {now_str} da ishni yakunladi.")
+        
+    elif status == 'lunch':
+        # OBEDDAN QAYTISH
+        cursor.execute("SELECT lunch_start, earned_today FROM attendance WHERE tg_id = ? AND date = ?", (message.from_user.id, today_str))
+        row_attendance = cursor.fetchone()
+        
+        lunch_over_minutes = 0
+        new_earned = row_attendance[1] if row_attendance else daily_rate
+        
+        if row_attendance and row_attendance[0]:
+            fmt = '%H:%M:%S'
+            d1 = datetime.strptime(now_str, fmt)
+            d2 = datetime.strptime(row_attendance[0], fmt)
+            total_lunch_minutes = int((d1 - d2).total_seconds() / 60)
+            
+            if total_lunch_minutes > OBED_LIMIT_MINUTES:
+                lunch_over_minutes = total_lunch_minutes - OBED_LIMIT_MINUTES
+                # Obeddan kechikilgan har bir daqiqa uchun oylikdan chegirib tashlanadi (Jahongir aka sharti)
+                new_earned = new_earned - (lunch_over_minutes * minute_rate)
+                if new_earned < 0: 
+                    new_earned = 0
+                    
+        cursor.execute(
+            "UPDATE attendance SET lunch_end = ?, lunch_over_minutes = ?, earned_today = ? WHERE tg_id = ? AND date = ?",
+            (now_str, lunch_over_minutes, new_earned, message.from_user.id, today_str)
+        )
+        cursor.execute("UPDATE employees SET status = 'working' WHERE tg_id = ?", (message.from_user.id,))
+        conn.commit()
+        
+        await message.answer(f"↩ Obeddan qaytdingiz. Ish davom etadi.\n⚠️ Obeddan oshib ketgan vaqt: {lunch_over_minutes} daqiqa.", reply_markup=get_employee_keyboard('working'))
+        await bot.send_message(ADMIN_ID, f"↩ Xodim **{full_name}** obeddan qaytdi. Oshib ketgan vaqt: {lunch_over_minutes} daqiqa.")
+        
+    conn.close()
+
+@dp.message(F.text == "🍽 Obedga chiqish")
+async def handle_lunch_start(message: types.Message):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, full_name FROM employees WHERE tg_id = ?", (message.from_user.id,))
+    emp = cursor.fetchone()
+    
+    if emp and emp[0] == 'working':
+        now_str = datetime.now().strftime("%H:%M:%S")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        
+        cursor.execute("UPDATE attendance SET lunch_start = ? WHERE tg_id = ? AND date = ?", (now_str, message.from_user.id, today_str))
+        cursor.execute("UPDATE employees SET status = 'lunch' WHERE tg_id = ?", (message.from_user.id,))
+        conn.commit()
+        
+        await message.answer(f"🍽 Obed vaqti boshlandi. Yoqimli ishtaha!\nLimit: {OBED_LIMIT_MINUTES} daqiqa.", reply_markup=get_employee_keyboard('lunch'))
+        await bot.send_message(ADMIN_ID, f"🍽 Xodim **{emp[1]}** {now_str} da obedga chiqdi.")
+        
+    conn.close()
+
+# 4. AVTOMATIK KUN YAKUNI VA JAZOLASH TIZIMI (SOAT 23:00 DA ISHLAYDI)
+async def auto_daily_cron():
+    while True:
+        now = datetime.now()
+        # Har kuni soat 23:00 da tekshiradi
+        if now.hour == 23 and now.minute == 0:
+            current_day_name = now.strftime('%A')
+            # Kun nomini o'zbekchaga o'girish
+            days_uz = {
+                'Monday': 'Dushanba', 'Tuesday': 'Seshanba', 'Wednesday': 'Chorshanba',
+                'Thursday': 'Payshanba', 'Friday': 'Juma', 'Saturday': 'Shanba', 'Sunday': 'Yakshanba'
+            }
+            uz_day = days_uz.get(current_day_name, 'Yakshanba')
+            
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            
+            # Bugun dam olish kunimi tekshirish
+            cursor.execute("SELECT is_off FROM off_days WHERE day_name = ?", (uz_day,))
+            is_off_row = cursor.fetchone()
+            
+            if is_off_row and is_off_row[0] == 1:
+                # Agar bugun dam olish kuni bo'lsa, tizim hech kimni jazolamaydi
+                conn.close()
+                await asyncio.sleep(60)
+                continue
+                
+            today_str = now.strftime("%Y-%m-%d")
+            cursor.execute("SELECT tg_id, full_name, daily_rate FROM employees")
+            all_employees = cursor.fetchall()
+            
+            for emp in all_employees:
+                tg_id, full_name, daily_rate = emp
+                cursor.execute("SELECT id FROM attendance WHERE tg_id = ? AND date = ?", (tg_id, today_str))
+                attendance_row = cursor.fetchone()
+                
+                # Agar xodim umuman kelmagan yoki kunni yopmagan bo'lsa (Jahongir aka sharti - B variant)
+                if not attendance_row:
+                    cursor.execute(
+                        "INSERT INTO attendance (tg_id, date, status, earned_today) VALUES (?, ?, 'absent', 0)",
+                        (tg_id, today_str)
+                    )
+                    # Xodimning statusini qayta inactive holatga tushiramiz
+                    cursor.execute("UPDATE employees SET status = 'inactive' WHERE tg_id = ?", (tg_id,))
+                    
+                    try:
+                        await bot.send_message(tg_id, "⚠️ Siz bugun ishga kelmadingiz yoki tizimda kunni yakunlamadingiz. Bugungi kun uchun ish haqi yozilmadi.")
+                    except Exception:
+                        pass
+                        
+            conn.commit()
+            conn.close()
+            await bot.send_message(ADMIN_ID, "🌙 Kun yakunlandi. Kelmagan yoki ishni yakunlamagan xodimlarga avtomatic 'Kelmagan' (absent) status berildi va kunlik maosh yozilmadi.")
+            
+        await asyncio.sleep(60)  # Har minutda tekshirib turadi
+
+# 5. RENDER UCHUN FASTAPI WEB SERVER (PING SYSTEM & LIVE DASHBOARD)
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    # Jonli dashboard ma'lumotlarini bazadan o'qib brauzerda ko'rsatish
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT e.full_name, e.status, a.arrival_time, a.late_minutes, a.earned_today 
+        FROM employees e
+        LEFT JOIN attendance a ON e.tg_id = a.tg_id AND a.date = date('now')
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    html_content = "<html><head><title>Sherin Bakery - Live Dashboard</title></head><body style='font-family:sans-serif; padding:20px; background:#f4f6f9;'>"
+    html_content += "<h1 style='color:#333;'>🧁 Sherin Bakery - Jonli Dashboard</h1>"
+    html_content += "<p>Render server holati: 🟢 Faol (Bot o'chib qolmaydi)</p>"
+    html_content += "<table border='1' cellpadding='10' style='border-collapse:collapse; background:#fff; width:100%; max-width:800px;'>"
+    html_content += "<tr style='background:#007bff; color:#fff;'><th>Xodim</th><th>Holat</th><th>Kelgan vaqti</th><th>Kechikish (min)</th><th>Bugungi daromad</th></tr>"
+    
+    for r in rows:
+        arrival = r[2] if r[2] else "-"
+        late = r[3] if r[3] is not None else "-"
+        earned = f"{r[4]:,.2f} so'm" if r[4] is not None else "-"
+        html_content += f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{arrival}</td><td>{late}</td><td>{earned}</td></tr>"
+        
+    html_content += "</table></body></html>"
+    return types.Response(content=html_content, media_type="text/html")
+
+async def run_bot():
+    asyncio.create_task(auto_daily_cron())  # Kunlik jazo cronini parallel ishga tushirish
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    # Server portini olish (Render talabi bo'yicha)
+    port = int(os.environ.get("PORT", 8000))
+    
+    # Botni FastAPI bilan birga asynchronous ishga tushirish
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_bot())
+    
+    uvicorn.run(app, host="0.0.0.0", port=port)
