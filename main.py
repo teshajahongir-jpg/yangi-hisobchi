@@ -19,8 +19,8 @@ import uvicorn
 # =============================================
 # 1. SOZLAMALAR — bu yerlarni o'zgartiring!
 # =============================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8701217643:AAF4ft6b-OJZHe7_N1-RkIS7qKXbimi39mk")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "8252424738"))  # O'z Telegram ID-ingizni yozing
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "TOKEN_NI_BU_YERGA_YOZING")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))  # O'z Telegram ID-ingizni yozing
 
 OFFICE_LAT = 39.7747
 OFFICE_LON = 64.4286
@@ -406,11 +406,19 @@ app = FastAPI()
 def home():
     return {"status": "running", "bot": "Attendance Bot"}
 
-async def main():
-    asyncio.create_task(dp.start_polling(bot))
-    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+async def run_bot():
+    await dp.start_polling(bot)
+
+async def run_web():
+    config = uvicorn.Config(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()
+
+async def main():
+    await asyncio.gather(
+        run_bot(),
+        run_web()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
