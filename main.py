@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 
 # --- SOZLAMALAR ---
-BOT_TOKEN = "8701217643:AAEvyEnA5d1fVQOKrgyZqduE9bW09W6t4RE"  # @BotFather dan oling
+BOT_TOKEN = "8701217643:AAGF39LZ8CsZd9pKmI2D0PtuWpND-1n1or0"  # @BotFather dan oling
 YOUR_CHAT_ID = 8252424738  # /start bosib o'z ID ingizni oling
 
 # Buxoro namoz vaqtlari API
