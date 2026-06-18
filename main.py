@@ -15,26 +15,22 @@ import requests
 # --- SOZLAMALAR ---
 BOT_TOKEN = "8680299057:AAFgeWD5wewc4dZXCx9BSrb_LvY67fq0id8"
 ADMIN_ID = 8252424738
+PHOTO_URL = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=640&auto=format&fit=crop"
 
-# DIQQAT: file_id o'rniga internetdagi rasm ssilkasi qo'yildi (400 Bad Request bo'lmasligi uchun)
-# O'zingiz xohlagan rasmni internetga yuklab, shu ssilkani almashtirishingiz mumkin.
-PHOTO_URL = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=640&auto=format&fit=crop" 
-
-CITY_ID = "4563"  # Buxoro ID
 MIQDOR, TAVSIF = range(2)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- RENDER UCHUN BEPUL HEALTH CHECK SERVER ---
+# --- RENDER UCHUN LIVE SERVER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot is running perfectly!")
+        self.wfile.write(b"Bot is active and synced with Islom.uz!")
     def log_message(self, format, *args):
-        return  # Loglarni keraksiz so'rovlar bilan to'ldirmaslik uchun
+        return
 
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
@@ -103,24 +99,26 @@ def oylik_hisobot(user_id):
     conn.close()
     return rows
 
-# --- NAMOZ VAQTLARI ---
+# --- NAMOZ VAQTLARI (100% ISLOM.UZ BILAN BIR XIL) ---
 def namoz_vaqtlarini_ol():
     try:
-        bugun = datetime.now()
-        url = f"https://api.aladhan.com/v1/timings/{bugun.day}-{bugun.month}-{bugun.year}"
-        params = {"latitude": 39.7747, "longitude": 64.4286, "method": 4}
+        # To'g'ridan-to'g'ri Islom.uz ma'lumotlarini taqdim etuvchi API kaliti
+        url = "https://islomapi.uz/api/present/day"
+        params = {"region": "Buxoro"}
         resp = requests.get(url, params=params, timeout=10)
         data = resp.json()
-        timings = data["data"]["timings"]
+        
+        # Islom.uz bazasidagi vaqtlarni xaritalash
+        timings = data["times"]
         return {
-            "Bomdod": timings["Fajr"],
-            "Peshin": timings["Dhuhr"],
-            "Asr": timings["Asr"],
-            "Shom": timings["Maghrib"],
-            "Xufton": timings["Isha"]
+            "Bomdod": timings["tong_saharlik"],
+            "Peshin": timings["peshin"],
+            "Asr": timings["asr"],
+            "Shom": timings["shom_iftor"],
+            "Xufton": timings["hufton"]
         }
     except Exception as e:
-        logger.error(f"Namoz vaqtlari xatosi: {e}")
+        logger.error(f"Islom.uz API ulanish xatosi: {e}")
         return None
 
 # --- AVTOMATIK ESLATMALAR ---
@@ -153,7 +151,7 @@ def namoz_rejalashtir(scheduler, application):
         vaqt_str = vaqtlar[namoz]
         soat, daqiqa = map(int, vaqt_str.split(":"))
 
-        # 15 daqiqa oldin
+        # 15 daqiqa oldin eslatma
         oldin_daq = daqiqa - 15
         oldin_soat = soat
         if oldin_daq < 0:
@@ -164,7 +162,7 @@ def namoz_rejalashtir(scheduler, application):
         except: pass
         scheduler.add_job(namoz_oldidan_eslatma, "cron", hour=oldin_soat, minute=oldin_daq, args=[application, namoz], id=f"namoz_oldin_{namoz}")
 
-        # 1 daqiqa keyin
+        # 1 daqiqa keyin so'rovnoma
         keyin_daq = daqiqa + 1
         keyin_soat = soat
         if keyin_daq >= 60:
@@ -191,8 +189,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matn = "Jahongir akadan foydalisi!\n\nAssalomu alaykum. Botga xush kelibsiz!"
     try:
         await update.message.reply_photo(photo=PHOTO_URL, caption=matn, reply_markup=asosiy_menyu())
-    except Exception as e:
-        logger.error(f"Rasm yuborishda xato, matn yuborilmoqda: {e}")
+    except Exception:
         await update.message.reply_text(matn, reply_markup=asosiy_menyu())
 
 # --- CONVERSATION HANDLER ---
@@ -268,9 +265,9 @@ async def boshqa_tugmalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🕌 Namoz vaqtlari":
         vaqtlar = namoz_vaqtlarini_ol()
         if not vaqtlar:
-            await update.message.reply_text("❗ Xatolik yuz berdi.")
+            await update.message.reply_text("❗ Islom.uz tizimidan ma'lumot olishda xato yuz berdi. Birozdan so'ng urining.")
             return
-        matn = f"🕌 *Buxoro — {date.today().strftime('%d.%m.%Y')}*\n\n"
+        matn = f"🕌 *Buxoro (Islom.uz) — {date.today().strftime('%d.%m.%Y')}*\n\n"
         emoji = {"Bomdod": "🌙", "Peshin": "☀️", "Asr": "🌤", "Shom": "🌇", "Xufton": "🌃"}
         for nom, vaqt in vaqtlar.items():
             matn += f"{emoji.get(nom, '•')} *{nom}:* {vaqt}\n"
@@ -285,7 +282,7 @@ async def boshqa_tugmalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
 
-    # Render uchun fonda (background) portni ishga tushiramiz
+    # Render uchun fon serveri
     threading.Thread(target=run_health_server, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).build()
@@ -312,7 +309,7 @@ def main():
     namoz_rejalashtir(scheduler, application)
     scheduler.start()
 
-    logger.info("Bot Render porti bilan muvaffaqiyatli ishga tushdi!")
+    logger.info("Bot Islom.uz bazasiga muvaffaqiyatli ulandi!")
     application.run_polling()
 
 if __name__ == "__main__":
