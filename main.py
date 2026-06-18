@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 from datetime import datetime
@@ -13,11 +14,12 @@ from aiogram.types import BufferedInputFile
 import aiosqlite
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import openpyxl
+from aiohttp import web
 
 # --- ⚙️ ASOSIY SOZLAMALAR ---
-BOT_TOKEN = "8680299057:AAHkjhdZITzVcxr9jUVd0LNO-bCqjOAAR2c"
-ADMIN_ID = 8252424738  # O'zingizning Telegram ID-ingizni yozing
-START_PHOTO = "https://images.unsplash.com/photo-1542838132-92c53300491e"  # Boshlang'ich rasm URL yoki File_ID
+BOT_TOKEN = "8680299057:AAEw2snOAVQrGk6MZr4FXfu8QI7vE-e1_Ew"
+ADMIN_ID = 123456789  # O'zingizning Telegram ID-ingizni yozing
+START_PHOTO = "https://images.unsplash.com/photo-1542838132-92c53300491e"  # Jahongir aka, o'zingizni rasmingiz URL manzilini qo'ying
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -28,7 +30,6 @@ DB_NAME = "database_v2.db"
 # --- 🗄 ASINXRON MA'LUMOTLAR BAZASINI YARATISH ---
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # Foydalanuvchilar jadvali
         await db.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -36,7 +37,6 @@ async def init_db():
                 daily_limit INTEGER DEFAULT 5
             )
         ''')
-        # Moliya (Kirim/Chiqim) jadvali
         await db.execute('''
             CREATE TABLE IF NOT EXISTS finance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +47,6 @@ async def init_db():
                 date TEXT
             )
         ''')
-        # Namozlar jadvali
         await db.execute('''
             CREATE TABLE IF NOT EXISTS prayer_stats (
                 user_id INTEGER,
@@ -60,7 +59,6 @@ async def init_db():
                 PRIMARY KEY (user_id, date)
             )
         ''')
-        # Qarzlar daftari jadvali
         await db.execute('''
             CREATE TABLE IF NOT EXISTS debts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,7 +291,7 @@ async def today_report(message: types.Message):
         f"🕌 O'qilgan namozlar: {total_prayers} / {limit}\n"
     )
     if total_prayers >= limit:
-        msg += "🎉 Barakalloh! Bugungi namoz limiti bajarildi!"
+        msg += "\n🎉 Barakalloh! Bugungi namoz limiti bajarildi!"
     await message.answer(msg, parse_mode="HTML")
 
 @dp.message(F.text == "📅 Oylik hisobot")
@@ -350,24 +348,38 @@ async def send_prayer_reminder():
         try:
             await bot.send_message(
                 chat_id=user[0],
-                text="🔔 <b>Namoz vaqtlari o'tdi. Namozlarni o'qib oldingizmi?</b>\nIltimos, kechiktirmasdan '🕌 Namoz vaqtlari' bo'limiga kirib belgilab qo'ying.",
+                text="🔔 <b>Namoz vaqtlari o'tdi. Nomozlarni o'qib oldingizmi?</b>\nIltimos, kechiktirmasdan '🕌 Namoz vaqtlari' bo'limiga kirib belgilab qo'ying.",
                 parse_mode="HTML"
             )
-            # Telegram FloodWait chekloviga tushmaslik uchun har bir foydalanuvchidan keyin 0.05 soniya kutamiz
             await asyncio.sleep(0.05)
         except Exception:
             continue
 
 # Eslatma vaqtlarini kunlik 5 mahal rejalashtirish
-scheduler.add_job(send_prayer_reminder, 'cron', hour=6, minute=0)   # Bomdoddan keyin
-scheduler.add_job(send_prayer_reminder, 'cron', hour=13, minute=15) # Peshindan keyin
-scheduler.add_job(send_prayer_reminder, 'cron', hour=17, minute=0)  # Asrdan keyin
-scheduler.add_job(send_prayer_reminder, 'cron', hour=19, minute=45) # Shomdan keyin
-scheduler.add_job(send_prayer_reminder, 'cron', hour=21, minute=30) # Xuftondan keyin
+scheduler.add_job(send_prayer_reminder, 'cron', hour=6, minute=0)
+scheduler.add_job(send_prayer_reminder, 'cron', hour=13, minute=15)
+scheduler.add_job(send_prayer_reminder, 'cron', hour=17, minute=0)
+scheduler.add_job(send_prayer_reminder, 'cron', hour=19, minute=45)
+scheduler.add_job(send_prayer_reminder, 'cron', hour=21, minute=30)
+
+# --- 🌐 RENDER UCHUN DUMMY WEB SERVER (PORT ALDASH) ---
+async def handle(request):
+    return web.Response(text="Bot is running perfectly!")
 
 async def main():
     await init_db()
     scheduler.start()
+    
+    # Render port xatosini yo'qotish uchun veb-serverni parallel ishga tushiramiz
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    asyncio.create_task(site.start())
+    
+    # Botni ishga tushirish
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
