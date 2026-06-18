@@ -1024,14 +1024,16 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matn += "─────────────────\n"
     matn += "*Foydalanuvchilar:*\n"
     for uid, ism, username, limit_q, eslatma in barcha_userlar():
-        uname = f"@{username}" if username else "—"
+        uname = f"@{username}" if username else "-"
         eslatma_matn = "✅" if eslatma == 1 else "🔇"
-        matn += f"🔹 {ism} ({uname}) {eslatma_matn}\n"
+        ism_toza = str(ism).replace("*", "").replace("_", "").replace("`", "").replace("[", "")
+        uname_toza = str(uname).replace("*", "").replace("_", "").replace("`", "").replace("[", "")
+        matn += f"🔹 {ism_toza} ({uname_toza}) {eslatma_matn}\n"
     if len(matn) > 4000:
         for i in range(0, len(matn), 4000):
-            await update.message.reply_text(matn[i:i+4000], parse_mode="Markdown")
+            await update.message.reply_text(matn[i:i+4000])
     else:
-        await update.message.reply_text(matn, parse_mode="Markdown")
+        await update.message.reply_text(matn)
 
 
 async def yordam(update: Update, context: ContextTypes.DEFAULT_TYPE):
