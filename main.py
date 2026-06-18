@@ -1,5 +1,8 @@
 import logging
 import sqlite3
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, date
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -10,15 +13,33 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 
 # --- SOZLAMALAR ---
-BOT_TOKEN = "8680299057:AAFgeWD5wewc4dZXCx9BSrb_LvY67fq0id8"  # @BotFather dan oling
-ADMIN_ID = 8252424738  # Sizning ID raqamingiz
-PHOTO_URL = "AgACAgIAAxkBAAEq2vlqM5l_Q5AU-nUqltwmM0zeQQbhsAACzBxG44wmUkK2OF-jPZzmAEAAwIAA3gAAzwE" # Siz tanlagan eng sifatli rasm kodi
+BOT_TOKEN = "8680299057:AAFgeWD5wewc4dZXCx9BSrb_LvY67fq0id8"
+ADMIN_ID = 8252424738
 
-# ConversationHandler uchun holatlar
+# DIQQAT: file_id o'rniga internetdagi rasm ssilkasi qo'yildi (400 Bad Request bo'lmasligi uchun)
+# O'zingiz xohlagan rasmni internetga yuklab, shu ssilkani almashtirishingiz mumkin.
+PHOTO_URL = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=640&auto=format&fit=crop" 
+
+CITY_ID = "4563"  # Buxoro ID
 MIQDOR, TAVSIF = range(2)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- RENDER UCHUN BEPUL HEALTH CHECK SERVER ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running perfectly!")
+    def log_message(self, format, *args):
+        return  # Loglarni keraksiz so'rovlar bilan to'ldirmaslik uchun
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
 
 # --- DATABASE ---
 def init_db():
@@ -112,10 +133,9 @@ async def barchaga_yubor(application, text, reply_markup=None):
             pass
 
 async def namoz_oldidan_eslatma(application, namoz_nomi):
-    await barchaga_yubor(application, f" 🕌 *{namoz_nomi}* namoziga 15 daqiqa qoldi. Tahoratingizni yangilab oling!")
+    await barchaga_yubor(application, f"🕌 *{namoz_nomi}* namoziga 15 daqiqa qoldi. Tahoratingizni yangilab oling!")
 
 async def namoz_keyin_sorov(application, namoz_nomi):
-    # Surovnoma tugmasi (Inline)
     keyboard = [[InlineKeyboardButton("✅ Ha, o'qidim", callback_data="namoz_ha")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await barchaga_yubor(application, f"✨ *{namoz_nomi}* vaqti kirdi. Namozlarni o'qib oldingizmi?", reply_markup=reply_markup)
@@ -133,7 +153,7 @@ def namoz_rejalashtir(scheduler, application):
         vaqt_str = vaqtlar[namoz]
         soat, daqiqa = map(int, vaqt_str.split(":"))
 
-        # 15 daqiqa oldin eslatish
+        # 15 daqiqa oldin
         oldin_daq = daqiqa - 15
         oldin_soat = soat
         if oldin_daq < 0:
@@ -144,7 +164,7 @@ def namoz_rejalashtir(scheduler, application):
         except: pass
         scheduler.add_job(namoz_oldidan_eslatma, "cron", hour=oldin_soat, minute=oldin_daq, args=[application, namoz], id=f"namoz_oldin_{namoz}")
 
-        # Namoz kirgandan 1 minut keyin so'rovnoma yuborish
+        # 1 daqiqa keyin
         keyin_daq = daqiqa + 1
         keyin_soat = soat
         if keyin_daq >= 60:
@@ -171,10 +191,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matn = "Jahongir akadan foydalisi!\n\nAssalomu alaykum. Botga xush kelibsiz!"
     try:
         await update.message.reply_photo(photo=PHOTO_URL, caption=matn, reply_markup=asosiy_menyu())
-    except Exception:
+    except Exception as e:
+        logger.error(f"Rasm yuborishda xato, matn yuborilmoqda: {e}")
         await update.message.reply_text(matn, reply_markup=asosiy_menyu())
 
-# --- INTERFAOL KORXONA (CONVERSATION HANDLER) ---
+# --- CONVERSATION HANDLER ---
 async def kirim_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['tur'] = 'kirim'
     await update.message.reply_text("💰 **Kirim miqdorini kiriting (faqat raqamda):**\nMasalan: `50000`", parse_mode="Markdown")
@@ -202,7 +223,6 @@ async def tavsif_qabul_qilish(update: Update, context: ContextTypes.DEFAULT_TYPE
     miqdor = context.user_data['miqdor']
 
     qosh_tranzaksiya(user_id, tur, miqdor, tavsif)
-    
     belgi = "✅ Kirim" if tur == 'kirim' else "❌ Chiqim"
     await update.message.reply_text(
         f"{belgi} muvaffaqiyatli qo'shildi!\n💰 *Miqdor:* {miqdor:,.0f} so'm\n📝 *Tavsif:* {tavsif}",
@@ -214,12 +234,10 @@ async def bekor_qilish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Jarayon bekor qilindi.", reply_markup=asosiy_menyu())
     return ConversationHandler.END
 
-# --- SO'ROVNOMA TUGMASI JAVOBI ---
 async def namoz_tugma_bosildi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "namoz_ha":
-        # Eski matnni saqlab, xabarni o'zgartiramiz
         await query.edit_message_text(text=f"{query.message.text}\n\n💚 *Alloh qabul qilsin!*", parse_mode="Markdown")
 
 # --- ODDIY MATN TUGMALARI BOSHQRUVI ---
@@ -247,9 +265,6 @@ async def boshqa_tugmalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         matn = f"📅 *{datetime.now().strftime('%B %Y')} oylik hisobot*\n─────────────────\n✅ Kirim:  *{kirim:,.0f} so'm*\n❌ Chiqim: *{chiqim:,.0f} so'm*\n─────────────────\n💰 Qoldiq: *{qoldiq:,.0f} so'm*\n"
         await update.message.reply_text(matn, parse_mode="Markdown")
         
-    elif text == "🇺🇿 Namoz vaqtlari":
-        # Yuqoridagi funksiyani chaqirish (matn mosligi uchun tekshiruv)
-        pass
     elif text == "🕌 Namoz vaqtlari":
         vaqtlar = namoz_vaqtlarini_ol()
         if not vaqtlar:
@@ -264,14 +279,17 @@ async def boshqa_tugmalar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🎯 Kunlik limit qo'shish":
         await update.message.reply_text("🎯 *Kunlik limit va odatlar*\n\nTez orada bu funksiya to'liq ishga tushadi!", parse_mode="Markdown")
     elif text == "ℹ️ Yordam (Qo'llanma)":
-        await update.message.reply_text("💡 **Yordam:**\n\nKirim va chiqimlarni kiritish uchun yuqoridagi mos tugmalarni bosing va miqdor hamda tavsifni yozing.")
+        await update.message.reply_text("💡 **Yordam:**\n\nKirim va chiqimlarni kiritish uchun yuqoridagi mos tugmalarni bosing.")
 
 # --- MAIN ---
 def main():
     init_db()
+
+    # Render uchun fonda (background) portni ishga tushiramiz
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Kirim/Chiqim dialog boshqaruvi (Conversation)
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Text("➕ Kirim qo'shish"), kirim_boshlash),
@@ -285,7 +303,6 @@ def main():
     )
     application.add_handler(conv_handler)
     
-    # Boshqa handlerlar
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(namoz_tugma_bosildi))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, boshqa_tugmalar))
@@ -295,7 +312,7 @@ def main():
     namoz_rejalashtir(scheduler, application)
     scheduler.start()
 
-    logger.info("Bot qayta ishga tushdi!")
+    logger.info("Bot Render porti bilan muvaffaqiyatli ishga tushdi!")
     application.run_polling()
 
 if __name__ == "__main__":
