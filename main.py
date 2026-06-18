@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 
 # --- SOZLAMALAR ---
-BOT_TOKEN = "8680299057:AAFgeWD5wewc4dZXCx9BSrb_LvY67fq0id8"
+BOT_TOKEN = "8680299057:AAFZwPMCzPYsjIlL_zPXKgKuvKkYP4zLEO0"
 ADMIN_ID = 8252424738
 PHOTO_URL = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=640&auto=format&fit=crop"
 
