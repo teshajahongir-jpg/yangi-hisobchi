@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # --- SOZLAMALAR ---
-BOT_TOKEN = "8680299057:AAHvUr7S21xzQnWZqv9JwayDheXFEEe_LxI"
+BOT_TOKEN = "8680299057:AAG3FqcA0CTha9rKVcTimh6Q56pIzeG1uuw"
 ADMIN_ID = 8252424738  # O'zingizning Telegram ID-ingizni yozing
 # Rasm URL-i yoki Telegram yuklangan rasmning file_id si
 START_PHOTO = "https://images.unsplash.com/photo-1542838132-92c53300491e" 
