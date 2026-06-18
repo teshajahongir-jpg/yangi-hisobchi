@@ -301,7 +301,7 @@ def namoz_vaqtlarini_ol():
         params = {
             "latitude": LATITUDE,
             "longitude": LONGITUDE,
-            "method": 4  # Umm Al-Qura metodi
+            "method": 2  # Umm Al-Qura metodi
         }
         resp = requests.get(url, params=params, timeout=10)
         data = resp.json()
