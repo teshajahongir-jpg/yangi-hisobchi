@@ -10,6 +10,9 @@ from telegram.ext import (
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import requests
 import openpyxl
+from aiohttp import web
+import asyncio
+import threading
 from openpyxl.styles import Font, PatternFill, Alignment
 from namoz_data import bugungi_namoz_vaqtlari
 
@@ -1199,7 +1202,28 @@ def main():
     scheduler.start()
 
     logger.info("Bot ishga tushdi!")
-    application.run_polling(drop_pending_updates=True)
+
+    async def health_check(request):
+        return web.Response(text="OK")
+
+    async def run_web():
+        app = web.Application()
+        app.router.add_get("/", health_check)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
+        await site.start()
+
+    async def run_bot():
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(drop_pending_updates=True)
+
+    async def main_async():
+        await asyncio.gather(run_web(), run_bot())
+        await asyncio.Event().wait()
+
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":
