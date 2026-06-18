@@ -99,51 +99,78 @@ def oylik_hisobot(user_id):
     conn.close()
     return rows
 
-# --- NAMOZ VAQTLARI (100% ISLOM.UZ BILAN BIR XIL) ---
+# --- NAMOZ VAQTLARI (100% ISLOM.UZ YILLI AVTOMAT TIZIM) ---
 def namoz_vaqtlarini_ol():
-    # 1-TIZIM: Rasmiy Islom.uz ma'lumotlari
+    import json
+    import os
+    
+    bugun_sana = datetime.now().strftime("%Y-%m-%d")
+    kesh_fayli = "islom_uz_yilli_baza.json"
+
+    # 1-TIZIM: Rasmiy Islom.uz API (Yil bo'yi 365 kun avtomat ishlaydi)
     try:
         url = "https://islomapi.uz/api/present/day"
         params = {"region": "Buxoro"}
-        resp = requests.get(url, params=params, timeout=6)
+        resp = requests.get(url, params=params, timeout=7)
+        
         if resp.status_code == 200:
             timings = resp.json()["times"]
-            return {
+            vaqtlar = {
                 "Bomdod": timings["tong_saharlik"],
                 "Peshin": timings["peshin"],
                 "Asr": timings["asr"],
                 "Shom": timings["shom_iftor"],
                 "Xufton": timings["hufton"]
             }
-    except Exception:
-        logger.warning("Islom.uz API ishlamadi, zaxira tizimga o'tilmoqda...")
-
-    # 2-TIZIM (ZAXIRA): Agar Islom.uz o'chib qolsa, aniq hisoblab beruvchi tizim
-    try:
-        bugun = datetime.now()
-        url = f"https://api.aladhan.com/v1/timings/{bugun.day}-{bugun.month}-{bugun.year}"
-        params = {"latitude": 39.7747, "longitude": 64.4286, "method": 4}
-        resp = requests.get(url, params=params, timeout=6)
-        if resp.status_code == 200:
-            t = resp.json()["data"]["timings"]
             
-            def togrila(vaqt_str, daqiqa_plyus):
-                h, m = map(int, vaqt_str.split(":"))
-                m += daqiqa_plyus
-                if m >= 60: h += 1; m -= 60
-                return f"{h:02d}:{m:02d}"
-
-            return {
-                "Bomdod": togrila(t["Fajr"], 26), 
-                "Peshin": t["Dhuhr"],
-                "Asr": t["Asr"],
-                "Shom": togrila(t["Maghrib"], 0),
-                "Xufton": t["Isha"]
-            }
+            # Kelajakda API o'chib qolgan vaziyatlar uchun bazani yangilab qo'yamiz
+            kesh_ma'lumoti = {}
+            if os.path.exists(kesh_fayli):
+                with open(kesh_fayli, "r", encoding="utf-8") as f:
+                    try: kesh_ma'lumoti = json.load(f)
+                    except: pass
+            
+            kesh_ma'lumoti[bugun_sana] = vaqtlar
+            with open(kesh_fayli, "w", encoding="utf-8") as f:
+                json.dump(kesh_ma'lumoti, f, ensure_ascii=False, indent=4)
+                
+            return vaqtlar
     except Exception as e:
-        logger.error(f"Ikkala namoz tizimi ham ishlamadi: {e}")
-        return None
+        logger.warning(f"Islom.uz API vaqtincha ishlamadi, zaxira bazadan olinmoqda: {e}")
 
+    # 2-TIZIM: ZAXIRA (Agar Islom.uz o'chib qolsa, o'zining yilli kesh bazasidan oladi)
+    if os.path.exists(kesh_fayli):
+        with open(kesh_fayli, "r", encoding="utf-8") as f:
+            try:
+                kesh_ma'lumoti = json.load(f)
+                if bugun_sana in kesh_ma'lumoti:
+                    return kesh_ma'lumoti[bugun_sana]
+            except:
+                pass
+
+    # 3-TIZIM: FAVQULODDA HOLAT (Agar keshda ham bo'lmasa, Islom.uz oylik jadvalidan to'g'ridan-to'g'ri tortadi)
+    try:
+        joriy_oy = datetime.now().month
+        url = f"https://islomapi.uz/api/monthly?region=Buxoro&month={joriy_oy}"
+        resp = requests.get(url, timeout=7)
+        if resp.status_code == 200:
+            oylik_royxat = resp.json()
+            bugun_kun = datetime.now().day
+            # Bugungi kunga mos keladigan qatorni topamiz
+            for kunlik in oylik_royxat:
+                if kunlik.get("date") and int(kunlik["date"].split(".")[0]) == bugun_kun:
+                    t = kunlik["times"]
+                    return {
+                        "Bomdod": t["tong_saharlik"],
+                        "Peshin": t["peshin"],
+                        "Asr": t["asr"],
+                        "Shom": t["shom_iftor"],
+                        "Xufton": t["hufton"]
+                    }
+    except Exception as e:
+        logger.error(f"Hech qaysi namoz tizimi ishlamadi: {e}")
+        
+    return None
 # --- AVTOMATIK ESLATMALAR ---
 async def barchaga_yubor(application, text, reply_markup=None):
     users = barcha_userlarni_ol()
