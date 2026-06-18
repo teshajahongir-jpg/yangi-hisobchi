@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # --- XAVFSIZLIK VA TOKЕN ---
 # DIQQAT: Tokenni @BotFather'dan yangilab, mana shu yerga qo'ying!
-BOT_TOKEN = "BU_YERGA_YANGI_XAVFSIZ_TOKENINGIZNI_QOYING"
+BOT_TOKEN = "8680299057:AAFZwPMCzPYsjIlL_zPXKgKuvKkYP4zLEO0"
 
 # --- MA'LUMOTLAR BAZASI (JSON FAYLLAR) ---
 USERS_FILE = "bot_users.json"
