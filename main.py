@@ -1109,8 +1109,8 @@ async def matn_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔔 Eslatmalar": eslatmalar_cmd,
         "❓ Yordam": yordam,
         "👑 Admin panel": admin_panel,
-        "📒 Qarz daftari": qarz_royxat_cmd,
-    }
+        "📒 Qarz ro'yxati": qarz_royxat_cmd,
+        "➕ Yangi qarz": qarz_boshlash,
     funksiya = mapping.get(matn)
     if funksiya:
         await funksiya(update, context)
