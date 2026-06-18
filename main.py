@@ -23,7 +23,6 @@ DB_PATH = os.path.join(BASE_DIR, "xarajat.db")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# ConversationHandler holatlari
 KIRIM_MIQDOR, KIRIM_TAVSIF = range(2)
 CHIQIM_MIQDOR, CHIQIM_KATEGORIYA, CHIQIM_TAVSIF = range(2, 5)
 LIMIT_KIRITISH = 5
@@ -42,7 +41,7 @@ MOTIVATSION_XABARLAR = [
     "🤲 Alloh barchangizga barakali kun bersin!",
     "✨ Bugun kichik qadamlar katta natijalarga olib boradi!",
     "🌱 Har bir yaxshi ish bilan kun boshlansin!",
-    "💡 Bugun bitta yangi narsa o'rganing — bu sizni oldinga olib boradi!",
+    "💡 Bugun bitta yangi narsa o'rganing!",
 ]
 
 
@@ -334,11 +333,13 @@ def qarz_royxat_db(user_id):
 def qarz_yop(qarz_id, user_id):
     conn = db_connect()
     c = conn.cursor()
-    c.execute("UPDATE qarzlar SET qaytarildi=1 WHERE id=? AND user_id=?", (qarz_id, user_id))
-    ta = c.rowcount
-    conn.commit()
+    c.execute("SELECT ism, miqdor, tur FROM qarzlar WHERE id=? AND user_id=?", (qarz_id, user_id))
+    row = c.fetchone()
+    if row:
+        c.execute("UPDATE qarzlar SET qaytarildi=1 WHERE id=? AND user_id=?", (qarz_id, user_id))
+        conn.commit()
     conn.close()
-    return ta > 0
+    return row
 
 
 def muddati_otgan_qarzlar():
@@ -356,12 +357,10 @@ def muddati_otgan_qarzlar():
 
 # ─── NAMOZ VAQTLARI ───────────────────────────────────────────
 def namoz_vaqtlarini_ol():
-    """Islom.uz dan olingan ma'lumotlardan bugungi vaqtni qaytaradi"""
     bugun = str(date.today())
     vaqtlar = bugungi_namoz_vaqtlari(bugun)
     if vaqtlar:
         return vaqtlar
-    # Agar jadvalda yo'q bo'lsa Aladhan API ga murojaat
     try:
         d = datetime.now()
         url = f"https://api.aladhan.com/v1/timings/{d.day}-{d.month}-{d.year}"
@@ -386,17 +385,14 @@ def vaqt_qosh(soat, daqiqa, delta):
 
 
 # ─── ESLATMALAR ───────────────────────────────────────────────
-async def barcha_userlarga_yuborish(application, matn, reply_markup=None):
+async def barcha_userlarga_yuborish(application, matn):
     for user_id, ism, username, limit_q, eslatma in barcha_userlar():
         if eslatma != 1:
             continue
         try:
-            await application.bot.send_message(
-                chat_id=user_id, text=matn,
-                parse_mode="Markdown", reply_markup=reply_markup
-            )
+            await application.bot.send_message(chat_id=user_id, text=matn, parse_mode="Markdown")
         except Exception as e:
-            logger.warning(f"{user_id} ga yuborib bo'lmadi: {e}")
+            logger.warning(f"{user_id}: {e}")
 
 
 async def namoz_eslatma(application, namoz_nomi):
@@ -493,13 +489,9 @@ def namoz_rejalashtir(scheduler, application):
     vaqtlar = namoz_vaqtlarini_ol()
     if not vaqtlar:
         return
-    namoz_emoji = {"bomdod": "🌙", "peshin": "☀️", "asr": "🌤", "shom": "🌇", "xufton": "🌃"}
     for namoz, vaqt_str in vaqtlar.items():
-        if namoz == "quyosh":
-            continue
         try:
             soat, daqiqa = map(int, vaqt_str.split(":"))
-            # 15 daqiqa oldin eslatma
             oldin_s, oldin_d = vaqt_qosh(soat, daqiqa, -15)
             try:
                 scheduler.remove_job(f"namoz_oldin_{namoz}")
@@ -511,7 +503,6 @@ def namoz_rejalashtir(scheduler, application):
                 args=[application, namoz.capitalize()],
                 id=f"namoz_oldin_{namoz}", replace_existing=True
             )
-            # 20 daqiqa keyin "o'qidingizmi?"
             keyin_s, keyin_d = vaqt_qosh(soat, daqiqa, 20)
             try:
                 scheduler.remove_job(f"namoz_keyin_{namoz}")
@@ -523,7 +514,6 @@ def namoz_rejalashtir(scheduler, application):
                 args=[application, namoz.capitalize()],
                 id=f"namoz_keyin_{namoz}", replace_existing=True
             )
-            # Bomdod uchun uyg'otish
             if namoz == "bomdod":
                 try:
                     scheduler.remove_job("uyg_onish")
@@ -546,9 +536,10 @@ def asosiy_menyu(user_id=None):
         ["📊 Bugungi hisobot", "📅 Oylik hisobot"],
         ["🗓 Haftalik hisobot", "📂 Kategoriya bo'yicha"],
         ["🕌 Namoz vaqtlari", "💸 Kunlik limit"],
-        ["💰 Oylik byudjet", "📒 Qarz daftari"],
-        ["📥 Excel hisobot", "🗑 Oxirgi yozuvni o'chirish"],
-        ["🔔 Eslatmalar", "❓ Yordam"],
+        ["💰 Oylik byudjet", "📒 Qarz ro'yxati"],
+        ["➕ Yangi qarz", "📥 Excel hisobot"],
+        ["🗑 Oxirgi yozuvni o'chirish", "🔔 Eslatmalar"],
+        ["❓ Yordam"],
     ]
     if user_id == ADMIN_ID:
         tugmalar.append(["👑 Admin panel"])
@@ -582,7 +573,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(matn, parse_mode="Markdown", reply_markup=asosiy_menyu(user.id))
 
 
-# ─── KIRIM CONVERSATION ───────────────────────────────────────
+# ─── KIRIM ────────────────────────────────────────────────────
 async def kirim_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("➕ Kirim miqdorini kiriting (masalan: 500000):", reply_markup=bekor_qilish_menyu())
     return KIRIM_MIQDOR
@@ -617,7 +608,7 @@ async def kirim_tavsif_qabul(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
-# ─── CHIQIM CONVERSATION ──────────────────────────────────────
+# ─── CHIQIM ───────────────────────────────────────────────────
 async def chiqim_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("➖ Chiqim miqdorini kiriting (masalan: 25000):", reply_markup=bekor_qilish_menyu())
     return CHIQIM_MIQDOR
@@ -679,7 +670,7 @@ async def bekor_qilish(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ─── LIMIT CONVERSATION ───────────────────────────────────────
+# ─── LIMIT ────────────────────────────────────────────────────
 async def limit_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     limit_q = limit_olish(update.effective_user.id)
     matn = "💸 Kunlik xarajat limitini kiriting (so'mda):\n"
@@ -702,17 +693,12 @@ async def limit_qabul(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return LIMIT_KIRITISH
     user_id = update.effective_user.id
     limit_saqlash(user_id, limit_q)
-    if limit_q == 0:
-        await update.message.reply_text("✅ Kunlik limit o'chirildi.", reply_markup=asosiy_menyu(user_id))
-    else:
-        await update.message.reply_text(
-            f"✅ Kunlik limit: *{limit_q:,.0f} so'm*",
-            parse_mode="Markdown", reply_markup=asosiy_menyu(user_id)
-        )
+    matn = "✅ Kunlik limit o'chirildi." if limit_q == 0 else f"✅ Kunlik limit: *{limit_q:,.0f} so'm*"
+    await update.message.reply_text(matn, parse_mode="Markdown", reply_markup=asosiy_menyu(user_id))
     return ConversationHandler.END
 
 
-# ─── BYUDJET CONVERSATION ─────────────────────────────────────
+# ─── BYUDJET ──────────────────────────────────────────────────
 async def byudjet_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     byudjet = byudjet_olish(update.effective_user.id)
     matn = "💰 Oylik byudjetingizni kiriting (so'mda):\n"
@@ -735,23 +721,18 @@ async def byudjet_qabul(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return BYUDJET_KIRITISH
     user_id = update.effective_user.id
     byudjet_saqlash(user_id, byudjet)
-    if byudjet == 0:
-        await update.message.reply_text("✅ Oylik byudjet o'chirildi.", reply_markup=asosiy_menyu(user_id))
-    else:
-        await update.message.reply_text(
-            f"✅ Oylik byudjet: *{byudjet:,.0f} so'm*",
-            parse_mode="Markdown", reply_markup=asosiy_menyu(user_id)
-        )
+    matn = "✅ Oylik byudjet o'chirildi." if byudjet == 0 else f"✅ Oylik byudjet: *{byudjet:,.0f} so'm*"
+    await update.message.reply_text(matn, parse_mode="Markdown", reply_markup=asosiy_menyu(user_id))
     return ConversationHandler.END
 
 
-# ─── QARZ CONVERSATION ────────────────────────────────────────
+# ─── QARZ ─────────────────────────────────────────────────────
 async def qarz_boshlash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("📤 Men berdim", callback_data="qarz_tur_berdi"),
         InlineKeyboardButton("📥 Men oldim", callback_data="qarz_tur_oldi")
     ]])
-    await update.message.reply_text("📒 *Qarz daftari*\n\nQarz turi:", parse_mode="Markdown", reply_markup=keyboard)
+    await update.message.reply_text("📒 *Yangi qarz*\n\nQarz turi:", parse_mode="Markdown", reply_markup=keyboard)
     return QARZ_TUR
 
 
@@ -836,14 +817,13 @@ async def bugun_hisobot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     kirim = sum(r[1] for r in rows if r[0] == "kirim")
     chiqim = sum(r[1] for r in rows if r[0] == "chiqim")
-    qoldiq = kirim - chiqim
     limit_q = limit_olish(user_id)
     matn = f"📊 *Bugun — {date.today().strftime('%d.%m.%Y')}*\n"
     matn += "─────────────────\n"
     matn += f"✅ Kirim:  *{kirim:,.0f} so'm*\n"
     matn += f"❌ Chiqim: *{chiqim:,.0f} so'm*\n"
     matn += "─────────────────\n"
-    matn += f"💰 Qoldiq: *{qoldiq:,.0f} so'm*\n"
+    matn += f"💰 Qoldiq: *{kirim-chiqim:,.0f} so'm*\n"
     if limit_q > 0:
         foiz = min(100, round(chiqim / limit_q * 100))
         matn += f"🎯 Limit: {foiz}% ({chiqim:,.0f}/{limit_q:,.0f})\n"
@@ -858,14 +838,13 @@ async def oy_hisobot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     kirim = next((r[1] for r in rows if r[0] == "kirim"), 0)
     chiqim = next((r[1] for r in rows if r[0] == "chiqim"), 0)
-    qoldiq = kirim - chiqim
     byudjet = byudjet_olish(user_id)
     matn = f"📅 *{datetime.now().strftime('%B %Y')} oylik hisobot*\n"
     matn += "─────────────────\n"
     matn += f"✅ Kirim:  *{kirim:,.0f} so'm*\n"
     matn += f"❌ Chiqim: *{chiqim:,.0f} so'm*\n"
     matn += "─────────────────\n"
-    matn += f"💰 Qoldiq: *{qoldiq:,.0f} so'm*\n"
+    matn += f"💰 Qoldiq: *{kirim-chiqim:,.0f} so'm*\n"
     if byudjet > 0:
         foiz = min(100, round(chiqim / byudjet * 100))
         matn += f"💰 Byudjet: {foiz}% ({chiqim:,.0f}/{byudjet:,.0f})\n"
@@ -913,8 +892,6 @@ async def namoz_vaqtlari_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     emoji = {"bomdod": "🌙", "peshin": "☀️", "asr": "🌤", "shom": "🌇", "xufton": "🌃"}
     matn = f"🕌 *Buxoro — {date.today().strftime('%d.%m.%Y')}*\n\n"
     for nom, vaqt in vaqtlar.items():
-        if nom == "quyosh":
-            continue
         matn += f"{emoji.get(nom, '•')} *{nom.capitalize()}:* {vaqt}\n"
     await update.message.reply_text(matn, parse_mode="Markdown")
 
@@ -931,8 +908,7 @@ async def excel_hisobot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ws.title = "Hisobot"
     sarlavha_font = Font(bold=True, color="FFFFFF")
     sarlavha_fill = PatternFill(start_color="2E7D32", end_color="2E7D32", fill_type="solid")
-    sarlavhalar = ["Sana", "Vaqt", "Turi", "Kategoriya", "Tavsif", "Miqdor (so'm)"]
-    ws.append(sarlavhalar)
+    ws.append(["Sana", "Vaqt", "Turi", "Kategoriya", "Tavsif", "Miqdor (so'm)"])
     for hujayra in ws[1]:
         hujayra.font = sarlavha_font
         hujayra.fill = sarlavha_fill
@@ -966,7 +942,7 @@ async def qarz_royxat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     qarzlar = qarz_royxat_db(user_id)
     if not qarzlar:
-        await update.message.reply_text("📭 Ochiq qarzlar yo'q.")
+        await update.message.reply_text("📭 Ochiq qarzlar yo'q.\n\n➕ Yangi qarz qo'shish uchun — *Yangi qarz* tugmasini bosing.", parse_mode="Markdown")
         return
     berganlar = [q for q in qarzlar if q[3] == "berdi"]
     olganlar = [q for q in qarzlar if q[3] == "oldi"]
@@ -995,8 +971,17 @@ async def qarz_qaytarildi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE
     except (IndexError, ValueError):
         await update.message.reply_text("❗ Yozing: `/qaytarildi 3`", parse_mode="Markdown")
         return
-    if qarz_yop(qarz_id, user_id):
-        await update.message.reply_text(f"✅ Qarz #{qarz_id} yopildi.")
+    row = qarz_yop(qarz_id, user_id)
+    if row:
+        ism, miqdor, tur = row
+        tur_matn = f"*{ism}* ga bergan qarzingiz" if tur == "berdi" else f"*{ism}* dan olgan qarzingiz"
+        await update.message.reply_text(
+            f"✅ *Qarz yopildi!*\n\n"
+            f"👤 {tur_matn}\n"
+            f"💰 Miqdor: *{miqdor:,.0f} so'm*\n"
+            f"📅 Sana: {date.today().strftime('%d.%m.%Y')}",
+            parse_mode="Markdown"
+        )
     else:
         await update.message.reply_text("❗ Topilmadi yoki sizga tegishli emas.")
 
@@ -1035,11 +1020,13 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matn += f"🟢 Bugun faol: *{faol}*\n"
     matn += f"✅ Oylik kirim: *{kirim:,.0f} so'm*\n"
     matn += f"❌ Oylik chiqim: *{chiqim:,.0f} so'm*\n"
+    matn += f"💰 Qoldiq: *{kirim-chiqim:,.0f} so'm*\n"
     matn += "─────────────────\n"
     matn += "*Foydalanuvchilar:*\n"
-    for user_id, ism, username, limit_q, eslatma in barcha_userlar():
+    for uid, ism, username, limit_q, eslatma in barcha_userlar():
         uname = f"@{username}" if username else "—"
-        matn += f"🔹 {ism} ({uname}) — limit: {limit_q:,.0f}\n"
+        eslatma_matn = "✅" if eslatma == 1 else "🔇"
+        matn += f"🔹 {ism} ({uname}) {eslatma_matn}\n"
     if len(matn) > 4000:
         for i in range(0, len(matn), 4000):
             await update.message.reply_text(matn[i:i+4000], parse_mode="Markdown")
@@ -1059,7 +1046,8 @@ async def yordam(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🕌 *Namoz vaqtlari* — Buxoro (islom.uz)\n"
         "💸 *Kunlik limit* — xarajat chegarasi\n"
         "💰 *Oylik byudjet* — oylik reja\n"
-        "📒 *Qarz daftari* — qarzlarni kuzatish\n"
+        "📒 *Qarz ro'yxati* — ochiq qarzlar\n"
+        "➕ *Yangi qarz* — qarz qo'shish\n"
         "📥 *Excel hisobot* — fayl yuklab olish\n"
         "🗑 *Oxirgi yozuvni o'chirish*\n"
         "🔔 *Eslatmalar* — yoqish/o'chirish\n\n"
@@ -1110,8 +1098,7 @@ async def matn_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❓ Yordam": yordam,
         "👑 Admin panel": admin_panel,
         "📒 Qarz ro'yxati": qarz_royxat_cmd,
-        "➕ Yangi qarz": qarz_boshlash,
-        }
+    }
     funksiya = mapping.get(matn)
     if funksiya:
         await funksiya(update, context)
@@ -1172,7 +1159,7 @@ def main():
     qarz_conv = ConversationHandler(
         entry_points=[
             CommandHandler("qarz", qarz_boshlash),
-            MessageHandler(filters.Regex("^📒 Yangi qarz$"), qarz_boshlash)
+            MessageHandler(filters.Regex("^➕ Yangi qarz$"), qarz_boshlash)
         ],
         states={
             QARZ_TUR: [CallbackQueryHandler(qarz_tur_callback, pattern="^qarz_tur_")],
