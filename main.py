@@ -18,7 +18,7 @@ from aiohttp import web
 
 # --- ⚙️ ASOSIY SOZLAMALAR ---
 BOT_TOKEN = "8680299057:AAEw2snOAVQrGk6MZr4FXfu8QI7vE-e1_Ew"
-ADMIN_ID = 123456789  # O'zingizning Telegram ID-ingizni yozing
+ADMIN_ID = 8252424738  # O'zingizning Telegram ID-ingizni yozing
 START_PHOTO = "https://images.unsplash.com/photo-1542838132-92c53300491e"  # Jahongir aka, o'zingizni rasmingiz URL manzilini qo'ying
 
 logging.basicConfig(level=logging.INFO)
