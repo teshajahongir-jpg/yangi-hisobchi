@@ -13,7 +13,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
 # --- SOZLAMALAR ---
-BOT_TOKEN = "8680299057:AAEBw-pAsK_it0cvsY8RUGbtcNVX_UmsPyQ"  # @BotFather dan oling
+BOT_TOKEN = "8680299057:AAFCjCU67X_WgBRCmAovk9-X-2CtJ2QG60c"  # @BotFather dan oling
 ADMIN_ID = 8252424738  # Sizning Telegram ID (admin huquqi shu ID ga beriladi)
 
 # Buxoro koordinatalari (namoz vaqtlari uchun)
