@@ -101,24 +101,47 @@ def oylik_hisobot(user_id):
 
 # --- NAMOZ VAQTLARI (100% ISLOM.UZ BILAN BIR XIL) ---
 def namoz_vaqtlarini_ol():
+    # 1-TIZIM: Rasmiy Islom.uz ma'lumotlari
     try:
-        # To'g'ridan-to'g'ri Islom.uz ma'lumotlarini taqdim etuvchi API kaliti
         url = "https://islomapi.uz/api/present/day"
         params = {"region": "Buxoro"}
-        resp = requests.get(url, params=params, timeout=10)
-        data = resp.json()
-        
-        # Islom.uz bazasidagi vaqtlarni xaritalash
-        timings = data["times"]
-        return {
-            "Bomdod": timings["tong_saharlik"],
-            "Peshin": timings["peshin"],
-            "Asr": timings["asr"],
-            "Shom": timings["shom_iftor"],
-            "Xufton": timings["hufton"]
-        }
+        resp = requests.get(url, params=params, timeout=6)
+        if resp.status_code == 200:
+            timings = resp.json()["times"]
+            return {
+                "Bomdod": timings["tong_saharlik"],
+                "Peshin": timings["peshin"],
+                "Asr": timings["asr"],
+                "Shom": timings["shom_iftor"],
+                "Xufton": timings["hufton"]
+            }
+    except Exception:
+        logger.warning("Islom.uz API ishlamadi, zaxira tizimga o'tilmoqda...")
+
+    # 2-TIZIM (ZAXIRA): Agar Islom.uz o'chib qolsa, aniq hisoblab beruvchi tizim
+    try:
+        bugun = datetime.now()
+        url = f"https://api.aladhan.com/v1/timings/{bugun.day}-{bugun.month}-{bugun.year}"
+        params = {"latitude": 39.7747, "longitude": 64.4286, "method": 4}
+        resp = requests.get(url, params=params, timeout=6)
+        if resp.status_code == 200:
+            t = resp.json()["data"]["timings"]
+            
+            def togrila(vaqt_str, daqiqa_plyus):
+                h, m = map(int, vaqt_str.split(":"))
+                m += daqiqa_plyus
+                if m >= 60: h += 1; m -= 60
+                return f"{h:02d}:{m:02d}"
+
+            return {
+                "Bomdod": togrila(t["Fajr"], 26), 
+                "Peshin": t["Dhuhr"],
+                "Asr": t["Asr"],
+                "Shom": togrila(t["Maghrib"], 0),
+                "Xufton": t["Isha"]
+            }
     except Exception as e:
-        logger.error(f"Islom.uz API ulanish xatosi: {e}")
+        logger.error(f"Ikkala namoz tizimi ham ishlamadi: {e}")
         return None
 
 # --- AVTOMATIK ESLATMALAR ---
