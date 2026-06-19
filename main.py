@@ -17,7 +17,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from namoz_data import bugungi_namoz_vaqtlari
 
 # ─── SOZLAMALAR ───────────────────────────────────────────────
-BOT_TOKEN = "8680299057:AAGNxlp-pZAsRD2iCDgtcRjydvT7REOvJvw"
+BOT_TOKEN = "8946241677:AAF8r3S-aRBigshEK5rxoerAv1RqVjZFuFs"
 ADMIN_ID = 8252424738
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
