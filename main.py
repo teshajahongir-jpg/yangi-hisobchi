@@ -1076,7 +1076,8 @@ async def oy_hisobot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if otgan_chiqim > 0:
         farq = chiqim - otgan_chiqim
         belgi = "📈" if farq > 0 else "📉"
-        matn += f"\n{belgi} O'tgan oyga nisbatan: *{abs(farq):,.0f} so'm {'ko\'p' if farq > 0 else 'kam'}*\n"
+        kop_yoki_kam = "ko'p" if farq > 0 else "kam"
+        matn += f"\n{belgi} O'tgan oyga nisbatan: *{abs(farq):,.0f} so'm {kop_yoki_kam}*\n"
 
     await update.message.reply_text(matn, parse_mode="Markdown")
 
