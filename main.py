@@ -438,10 +438,12 @@ def keyingi_namoz():
     vaqtlar = namoz_vaqtlarini_ol()
     if not vaqtlar:
         return "—", "—"
-    hozir = datetime.now().strftime("%H:%M")
+    hozir = datetime.now()
     emoji = {"bomdod": "🌙", "peshin": "☀️", "asr": "🌤", "shom": "🌇", "xufton": "🌃"}
     for nom, vaqt in vaqtlar.items():
-        if vaqt > hozir:
+        vaqt_dt = datetime.strptime(vaqt, "%H:%M").replace(
+            year=hozir.year, month=hozir.month, day=hozir.day)
+        if vaqt_dt > hozir:
             return f"{emoji.get(nom, '')} {nom.capitalize()}", vaqt
     return "🌙 Bomdod (ertaga)", vaqtlar.get("bomdod", "—")
 
